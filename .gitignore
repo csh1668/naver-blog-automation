@@ -25,3 +25,4 @@ keystore.properties
 *.env
 
 .superpowers/
+gradle/gradle-daemon-jvm.properties
