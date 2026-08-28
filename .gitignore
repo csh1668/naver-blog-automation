@@ -23,3 +23,6 @@ Thumbs.db
 # Secrets
 keystore.properties
 *.env
+
+.superpowers/
+gradle/gradle-daemon-jvm.properties

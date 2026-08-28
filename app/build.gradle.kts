@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -5,6 +7,11 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
 }
+
+val keystoreProps: Properties? = rootProject.file("keystore.properties").takeIf { it.exists() }
+    ?.let { f -> Properties().apply { f.inputStream().use(::load) } }
+
+fun propOrNull(name: String): String? = keystoreProps?.getProperty(name)
 
 android {
     namespace = "com.csh.blogwriter"
@@ -19,11 +26,26 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    val releaseKeystorePath = System.getenv("KEYSTORE_PATH") ?: propOrNull("storeFile")
+
+    signingConfigs {
+        create("release") {
+            if (releaseKeystorePath != null) {
+                storeFile = rootProject.file(releaseKeystorePath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: propOrNull("storePassword")
+                keyAlias = System.getenv("KEY_ALIAS") ?: propOrNull("keyAlias")
+                keyPassword = System.getenv("KEY_PASSWORD") ?: propOrNull("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // 키스토어가 없으면(예: CI 의 빌드 확인) 서명하지 않고 unsigned APK 로 만든다.
+            signingConfig = if (releaseKeystorePath != null) signingConfigs.getByName("release") else null
         }
     }
 
