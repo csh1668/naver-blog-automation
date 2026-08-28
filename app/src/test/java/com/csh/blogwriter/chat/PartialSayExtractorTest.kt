@@ -16,8 +16,12 @@ class PartialSayExtractorTest {
         assertNull(PartialSayExtractor.extract("""{"say":"""))
     }
 
-    @Test fun ignoresSayInsideAnEarlierStringValue() =
-        assertEquals("진짜", PartialSayExtractor.extract("""{"note":"\"say\":\"가짜","say":"진짜"""))
+    @Test fun ignoresSayInsideAnEarlierStringValue() {
+        // 앞 문자열 값 안에 이스케이프 없는 "say":" 가 섞여 들어와도 그건 키가 아니다(앞글자가 a).
+        assertEquals("진짜", PartialSayExtractor.extract("""{"note":"a "say":"가짜 b","say":"진짜"""))
+        // 쉼표 뒤 공백/줄바꿈이 끼어도 키로 인정한다.
+        assertEquals("ok", PartialSayExtractor.extract("{\"plan\":null ,\n \"say\":\"ok"))
+    }
 
     @Test fun dropsIncompleteUnicodeEscape() = assertEquals("a", PartialSayExtractor.extract("""{"say":"a\u"""))
 
