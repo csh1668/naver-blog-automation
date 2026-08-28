@@ -28,7 +28,7 @@ class ImagePreparer @Inject constructor(@ApplicationContext private val context:
         val dir = dir(jobId)
         uris.mapIndexed { index, uri ->
             val ref = "img_%03d".format(index + 1)
-            val bitmap = decodeScaled(uri)
+            val bitmap = decodeScaled(uri, LONG_EDGE)
             val out = File(dir, "$ref.jpg")
             out.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, QUALITY, it) }
             val prepared = PreparedImage(ref, out, bitmap.width, bitmap.height)
@@ -54,18 +54,19 @@ class ImagePreparer @Inject constructor(@ApplicationContext private val context:
 
     override fun clear(jobId: String) { dir(jobId).deleteRecursively() }
 
-    private fun decodeScaled(uri: Uri): Bitmap {
+    /** 갤러리 Uri → EXIF 회전을 적용하고 긴 변을 [longEdge] 이하로 줄인 비트맵. 채팅 첨부(1024px)도 이 규칙을 쓴다. */
+    fun decodeScaled(uri: Uri, longEdge: Int): Bitmap {
         val resolver = context.contentResolver
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         resolver.openInputStream(uri)!!.use { BitmapFactory.decodeStream(it, null, bounds) }
         var sample = 1
-        while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= LONG_EDGE) sample *= 2
+        while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= longEdge) sample *= 2
         val decoded = resolver.openInputStream(uri)!!.use {
             BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
         } ?: error("이미지를 읽을 수 없습니다: $uri")
         val orientation = resolver.openInputStream(uri)!!.use { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) }
-        val longEdge = max(decoded.width, decoded.height)
-        val scale = if (longEdge > LONG_EDGE) LONG_EDGE.toFloat() / longEdge else 1f
+        val actualLongEdge = max(decoded.width, decoded.height)
+        val scale = if (actualLongEdge > longEdge) longEdge.toFloat() / actualLongEdge else 1f
         val matrix = Matrix().apply {
             if (scale < 1f) postScale(scale, scale)
             when (orientation) {

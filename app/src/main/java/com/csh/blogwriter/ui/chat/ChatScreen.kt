@@ -1,0 +1,409 @@
+package com.csh.blogwriter.ui.chat
+
+import android.net.Uri
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.List
+import androidx.compose.material.icons.automirrored.rounded.Article
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import android.os.Bundle
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.rememberHiltViewModelFactory
+import androidx.lifecycle.DEFAULT_ARGS_KEY
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.defaultViewModelCreationExtras
+import androidx.lifecycle.defaultViewModelProviderFactory
+import androidx.lifecycle.viewmodel.MutableCreationExtras
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.csh.blogwriter.chat.AttachedPhoto
+import com.csh.blogwriter.data.repo.ChatMessage
+import com.csh.blogwriter.data.repo.MessageKind
+import com.csh.blogwriter.data.repo.MessageRole
+import com.csh.blogwriter.domain.publish.PublishState
+import com.csh.blogwriter.ui.chat.components.Composer
+import com.csh.blogwriter.ui.chat.components.MessageBubble
+import com.csh.blogwriter.ui.chat.components.PhotosBubble
+import com.csh.blogwriter.ui.chat.components.PlanCard
+import com.csh.blogwriter.ui.chat.components.QuickReplyChips
+import com.csh.blogwriter.ui.chat.components.SessionListPane
+import com.csh.blogwriter.ui.chat.components.SessionListWidth
+import com.csh.blogwriter.ui.chat.components.SessionRailWidth
+import com.csh.blogwriter.ui.chat.components.SystemMessage
+import com.csh.blogwriter.ui.chat.components.ToolStatusLine
+import com.csh.blogwriter.ui.components.BannerKind
+import com.csh.blogwriter.ui.components.InlineBanner
+import com.csh.blogwriter.ui.components.PhotoGrid
+import com.csh.blogwriter.ui.components.WeakButton
+import com.csh.blogwriter.ui.publish.PublishPanel
+import com.csh.blogwriter.ui.publish.PublishViewModel
+import com.csh.blogwriter.ui.theme.AppSpacing
+import com.csh.blogwriter.ui.theme.AppTheme
+import kotlinx.coroutines.launch
+
+/** 가로 3단(대화 기록·채팅·에디터 패널)로 나눌 수 있는 최소 폭. */
+private val WIDE_MIN = 840.dp
+private val PANEL_MIN = 520.dp
+private val TRAY_MAX_HEIGHT = 240.dp
+
+@Composable
+fun ChatScreen(
+    sessionId: String?,
+    onBack: () -> Unit,
+    onOpenMemory: () -> Unit,
+    onSessionExpired: (jobId: String) -> Unit,
+    onFailed: (jobId: String) -> Unit,
+    viewModel: ChatViewModel = hiltViewModel(),
+) {
+    val ui by viewModel.uiState.collectAsStateWithLifecycle()
+    val sessions by viewModel.sessions.collectAsStateWithLifecycle()
+    LaunchedEffect(sessionId) { viewModel.open(sessionId) }
+
+    // 패널을 한 번 연 뒤에는 접어도 컴포지션에 남겨 둔다 — 빠지면 WebView 가 파괴돼 처음부터 다시 올려야 한다.
+    // 대화를 바꾸면 처음부터 다시 센다: 안 그러면 이어 쓰던 글이 있는 대화를 열자마자
+    // 접힌 채로 에디터를 띄우고 사진까지 올리기 시작한다.
+    val openSessionId = ui.session?.id
+    var panelMounted by remember(openSessionId) { mutableStateOf(false) }
+    var panelStatus by remember(openSessionId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(openSessionId, ui.panelOpen, ui.panelJobId) {
+        if (ui.panelOpen) panelMounted = true
+        if (ui.panelJobId == null) { panelMounted = false; panelStatus = null }
+    }
+
+    BoxWithConstraints(Modifier.fillMaxSize().background(AppTheme.colors.background)) {
+        val screenWidth = maxWidth
+        val wide = screenWidth >= WIDE_MIN
+        val panelWidth = maxOf(PANEL_MIN, screenWidth / 2)
+        val panelMountedNow = panelMounted && ui.panelJobId != null
+        val shownPanelWidth by animateDpAsState(
+            targetValue = if (ui.panelOpen) (if (wide) panelWidth else screenWidth) else 0.dp,
+            animationSpec = tween(200), label = "panelWidth",
+        )
+
+        if (wide) {
+            Row(Modifier.fillMaxSize()) {
+                Box(Modifier.width(if (ui.listCollapsed) SessionRailWidth else SessionListWidth).fillMaxHeight().statusBarsPadding()) {
+                    SessionListPane(
+                        sessions = sessions,
+                        currentId = ui.session?.id,
+                        collapsed = ui.listCollapsed,
+                        onSelect = viewModel::open,
+                        onNew = { viewModel.open(null) },
+                        onToggle = viewModel::toggleList,
+                    )
+                }
+                ChatPane(
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    ui = ui,
+                    viewModel = viewModel,
+                    panelStatus = panelStatus,
+                    onOpenMemory = onOpenMemory,
+                    onBack = onBack,
+                    onOpenSessions = null,
+                )
+                if (panelMountedNow) {
+                    // 접을 때는 폭만 0 으로 줄인다 — 컴포지션에 남아 있어야 WebView 와 편집 내용이 살아남는다.
+                    Box(Modifier.width(shownPanelWidth).fillMaxHeight().clipToBounds()) {
+                        Box(Modifier.requiredWidth(panelWidth).fillMaxHeight()) {
+                            PanelHost(ui.panelJobId, viewModel, onSessionExpired, onFailed) { panelStatus = it }
+                        }
+                    }
+                }
+            }
+        } else {
+            val drawerState = rememberDrawerState(DrawerValue.Closed)
+            val scope = rememberCoroutineScope()
+            ModalNavigationDrawer(
+                drawerState = drawerState,
+                drawerContent = {
+                    ModalDrawerSheet(Modifier.width(SessionListWidth)) {
+                        SessionListPane(
+                            sessions = sessions,
+                            currentId = ui.session?.id,
+                            collapsed = false,
+                            onSelect = { id -> viewModel.open(id); scope.launch { drawerState.close() } },
+                            onNew = { viewModel.open(null); scope.launch { drawerState.close() } },
+                            onToggle = { scope.launch { drawerState.close() } },
+                        )
+                    }
+                },
+            ) {
+                ChatPane(
+                    modifier = Modifier.fillMaxSize(),
+                    ui = ui,
+                    viewModel = viewModel,
+                    panelStatus = panelStatus,
+                    onOpenMemory = onOpenMemory,
+                    onBack = onBack,
+                    onOpenSessions = { scope.launch { drawerState.open() } },
+                )
+            }
+            if (panelMountedNow) {
+                if (ui.panelOpen) BackHandler { viewModel.togglePanel() }
+                // 세로에서도 접힌 패널은 폭 0 으로만 줄인다 (WebView 를 살려 두려고).
+                Box(Modifier.align(Alignment.CenterEnd).width(shownPanelWidth).fillMaxHeight().clipToBounds()) {
+                    Column(Modifier.requiredWidth(screenWidth).fillMaxHeight().background(AppTheme.colors.background)) {
+                        Row(Modifier.fillMaxWidth().statusBarsPadding().padding(AppSpacing.sm), verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = viewModel::togglePanel, modifier = Modifier.size(AppSpacing.touchTarget)) {
+                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "채팅으로", tint = AppTheme.colors.textPrimary)
+                            }
+                            Text("채팅으로", style = AppTheme.typography.body1, color = AppTheme.colors.textPrimary)
+                        }
+                        Box(Modifier.weight(1f)) {
+                            PanelHost(ui.panelJobId, viewModel, onSessionExpired, onFailed) { panelStatus = it }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 가운데 채팅: 상단 바 + 말풍선 목록 + 빠른 답장 + 입력줄. */
+@Composable
+private fun ChatPane(
+    modifier: Modifier,
+    ui: ChatUiState,
+    viewModel: ChatViewModel,
+    panelStatus: String?,
+    onOpenMemory: () -> Unit,
+    onBack: () -> Unit,
+    onOpenSessions: (() -> Unit)?,
+) {
+    val c = AppTheme.colors
+    var draft by remember { mutableStateOf("") }
+    /** 방금 보냈으면 읽던 자리와 상관없이 맨 아래로 따라간다. */
+    var justSent by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val itemCount = ui.messages.size + (if (ui.streamingSay != null) 1 else 0) + (if (ui.thinking) 1 else 0)
+    LaunchedEffect(itemCount, ui.streamingSay) {
+        if (itemCount == 0) return@LaunchedEffect
+        // 위쪽 지난 대화를 읽는 중이면 끌어내리지 않는다.
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: (itemCount - 1)
+        if (justSent || lastVisible >= itemCount - 2) {
+            listState.animateScrollToItem(itemCount - 1)
+            justSent = false
+        }
+    }
+
+    Column(modifier.statusBarsPadding().navigationBarsPadding().imePadding()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = AppSpacing.sm), verticalAlignment = Alignment.CenterVertically) {
+            if (onOpenSessions != null) {
+                IconButton(onClick = onOpenSessions, modifier = Modifier.size(AppSpacing.touchTarget)) {
+                    Icon(Icons.AutoMirrored.Rounded.List, contentDescription = "대화 기록", tint = c.textSecondary)
+                }
+            } else {
+                IconButton(onClick = onBack, modifier = Modifier.size(AppSpacing.touchTarget)) {
+                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "뒤로 가기", tint = c.textSecondary)
+                }
+            }
+            Text(
+                ui.session?.title ?: "새 글",
+                style = AppTheme.typography.title3, color = c.textPrimary,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(horizontal = AppSpacing.sm),
+            )
+            TextButton(onClick = onOpenMemory) { Text("기억한 것들", style = AppTheme.typography.body2, color = c.fillBrand) }
+            if (ui.panelJobId != null) {
+                IconButton(onClick = viewModel::togglePanel, modifier = Modifier.size(AppSpacing.touchTarget)) {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.Article,
+                        contentDescription = if (ui.panelOpen) "초안 접기" else "초안 열기",
+                        tint = if (ui.panelOpen) c.fillBrand else c.textSecondary,
+                    )
+                }
+            }
+        }
+        if (!ui.hasKey) {
+            Box(Modifier.padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
+                InlineBanner(ChatViewModel.NO_KEY, BannerKind.Warning)
+            }
+        }
+        ui.error?.let { message ->
+            Box(Modifier.padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
+                InlineBanner(message, BannerKind.Danger, onClick = viewModel::clearError)
+            }
+        }
+        // 패널을 접어 둔 동안에도 초안이 어디까지 갔는지 여기서 보인다 (디자인 가이드 §8).
+        if (ui.panelJobId != null && !ui.panelOpen && panelStatus != null) {
+            Box(Modifier.padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
+                InlineBanner("$panelStatus — 열기", BannerKind.Info, onClick = viewModel::togglePanel)
+            }
+        }
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = AppSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.xs),
+        ) {
+            items(ui.messages, key = { it.id }) { message -> MessageItem(message, ui.panelOpen, viewModel) }
+            ui.streamingSay?.let { partial -> item { MessageBubble(partial, mine = false) } }
+            if (ui.thinking) item { ToolStatusLine(ui.toolStatus) }
+        }
+        QuickReplyChips(ui.quickReplies) { justSent = true; viewModel.sendQuickReply(it) }
+        AttachmentTray(ui.tray, viewModel)
+        // 초안이 나온 뒤 붙인 사진은 에디터에 올라가 있지 않아 다음 수정본 주입이 깨진다 — 버튼을 막고 이유를 알려 준다.
+        if (ui.panelJobId != null) {
+            Text(
+                ChatViewModel.NO_PHOTO_AFTER_DRAFT,
+                style = AppTheme.typography.caption,
+                color = c.textTertiary,
+                modifier = Modifier.padding(horizontal = AppSpacing.lg),
+            )
+        }
+        Composer(
+            text = draft,
+            onTextChange = { draft = it },
+            onSend = { justSent = true; viewModel.send(draft); draft = "" },
+            onAttach = viewModel::attachPhotos,
+            enabled = ui.hasKey && !ui.thinking,
+            placeholder = if (ui.thinking) "글을 구상하고 있어요" else "오늘 있었던 일을 들려주세요",
+            canAttach = ui.panelJobId == null,
+        )
+    }
+}
+
+/** 입력창 위에 걸리는 사진판. 보내기 전에 빼거나 순서를 바꿀 수 있다. */
+@Composable
+private fun AttachmentTray(photos: List<AttachedPhoto>, viewModel: ChatViewModel) {
+    if (photos.isEmpty()) return
+    val uris = remember(photos) { photos.map { Uri.parse(it.uri) } }
+    Column(Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
+        Text("붙인 사진 ${photos.size}장", style = AppTheme.typography.caption, color = AppTheme.colors.textSecondary)
+        Spacer(Modifier.height(AppSpacing.sm))
+        // 많이 고르면 사진판이 화면을 다 먹는다 — 높이를 묶고 그 안에서 넘긴다.
+        Box(Modifier.heightIn(max = TRAY_MAX_HEIGHT).verticalScroll(rememberScrollState())) {
+            PhotoGrid(
+                uris = uris,
+                // 위치는 사진판 기준으로 그대로 넘긴다 (뷰모델이 안 보낸 사진 시작점을 더한다).
+                onRemove = { uri -> photos.firstOrNull { it.uri == uri.toString() }?.let { viewModel.removePhoto(it.ref) } },
+                onMove = { from, to -> viewModel.movePhoto(from, to) },
+                columns = 5,
+            )
+        }
+    }
+}
+
+/** 접힌 패널 배너에 쓸 한 줄. 발행이 끝나면(=패널이 사라지면) null. */
+private fun panelStatusText(state: PublishState): String? = when (state) {
+    is PublishState.Idle, is PublishState.PreparingImages -> "사진을 준비하고 있어요"
+    is PublishState.LoadingEditor, is PublishState.DismissingPopups -> "네이버 글쓰기 화면을 여는 중이에요"
+    is PublishState.UploadingImages -> "사진을 올리고 있어요 ${state.total}장 중 ${state.done}장"
+    is PublishState.Injecting -> "초안을 넣고 있어요"
+    is PublishState.Reviewing -> "초안이 준비됐어요"
+    is PublishState.SessionExpired -> "네이버에 다시 로그인해 주세요"
+    is PublishState.Failed -> "초안을 넣다가 문제가 생겼어요"
+    is PublishState.Published -> null
+}
+
+@Composable
+private fun MessageItem(message: ChatMessage, panelOpen: Boolean, viewModel: ChatViewModel) {
+    when (message.kind) {
+        MessageKind.TEXT -> MessageBubble(ChatPayloads.readText(message.payloadJson), mine = message.role == MessageRole.USER)
+        MessageKind.PHOTOS -> ChatPayloads.readPhotos(message.payloadJson)?.let { PhotosBubble(it.uris) }
+        MessageKind.PLAN -> ChatPayloads.readPlan(message.payloadJson)?.let { plan ->
+            PlanCard(plan) { index, title -> viewModel.sendQuickReply("${index}번 제목으로: $title") }
+        }
+        MessageKind.POST -> SystemMessage {
+            Column {
+                InlineBanner("초안을 만들었어요", BannerKind.Success)
+                if (!panelOpen) {
+                    Spacer(Modifier.height(AppSpacing.sm))
+                    WeakButton("초안 열기", onClick = viewModel::togglePanel)
+                }
+            }
+        }
+        MessageKind.SYSTEM -> SystemMessage { InlineBanner(ChatPayloads.readText(message.payloadJson), BannerKind.Info) }
+    }
+}
+
+/** 오른쪽 에디터 패널. 발행 작업마다 따로 살아 있는 [PublishViewModel] 을 붙인다. */
+@Composable
+private fun PanelHost(
+    jobId: String?,
+    chatViewModel: ChatViewModel,
+    onSessionExpired: (jobId: String) -> Unit,
+    onFailed: (jobId: String) -> Unit,
+    onStatus: (String?) -> Unit,
+) {
+    if (jobId == null) return
+    val publishViewModel = rememberPublishViewModel(jobId)
+    val publishUi by publishViewModel.uiState.collectAsStateWithLifecycle()
+
+    LaunchedEffect(publishViewModel) {
+        chatViewModel.reinject.collect { publishViewModel.reinject(it) }
+    }
+    LaunchedEffect(publishUi.state) {
+        onStatus(panelStatusText(publishUi.state))
+        (publishUi.state as? PublishState.Published)?.let { chatViewModel.onPublished(it.url) }
+    }
+    PublishPanel(
+        viewModel = publishViewModel,
+        modifier = Modifier.fillMaxSize(),
+        onDone = chatViewModel::togglePanel,
+        onSessionExpired = onSessionExpired,
+        onFailed = onFailed,
+        onCancelRequest = chatViewModel::togglePanel,
+    )
+}
+
+/**
+ * PublishViewModel 은 jobId 를 SavedStateHandle 로 받는다 — 화면 경로가 아니라 채팅 안에서 열리므로
+ * 기본 인자를 직접 실어 준다. key 를 jobId 로 두어 작업마다 별도 인스턴스를 갖는다.
+ */
+@Composable
+private fun rememberPublishViewModel(jobId: String): PublishViewModel {
+    val owner = checkNotNull(LocalViewModelStoreOwner.current) { "ViewModelStoreOwner 가 없어요" }
+    val factory = rememberHiltViewModelFactory(owner.defaultViewModelProviderFactory)
+    val extras = remember(owner, jobId) {
+        MutableCreationExtras(owner.defaultViewModelCreationExtras).apply {
+            set(DEFAULT_ARGS_KEY, Bundle().apply { putString("jobId", jobId) })
+        }
+    }
+    return viewModel(owner, key = jobId, factory = factory, extras = extras)
+}

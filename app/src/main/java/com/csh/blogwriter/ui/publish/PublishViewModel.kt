@@ -9,6 +9,7 @@ import com.csh.blogwriter.data.repo.FailureLogRepository
 import com.csh.blogwriter.data.repo.HistoryRepository
 import com.csh.blogwriter.data.repo.PendingJob
 import com.csh.blogwriter.data.repo.PendingJobRepository
+import com.csh.blogwriter.domain.model.PostContent
 import com.csh.blogwriter.domain.model.PreparedImage
 import com.csh.blogwriter.domain.publish.PublishEffect
 import com.csh.blogwriter.domain.publish.PublishEvent
@@ -78,13 +79,38 @@ class PublishViewModel @Inject constructor(
     private var timeoutJob: Job? = null
     private var pollJob: Job? = null
     private var started = false
+    /** WebView 가 없어진 뒤인지. 패널을 접었다 다시 펴면 새 WebView 라 처음부터 다시 해야 한다. */
+    private var detached = false
 
     fun attach(controller: EditorController) {
         this.controller = controller
-        if (!started) { started = true; viewModelScope.launch { start() } }
+        when {
+            !started -> { started = true; viewModelScope.launch { start() } }
+            // 이전 WebView 는 파괴돼 화면이 비어 있다 — 발행까지 끝난 게 아니라면 다시 채워 넣는다.
+            detached && _uiState.value.state !is PublishState.Published -> { uploaded.clear(); dispatch(PublishEvent.Retry) }
+        }
+        detached = false
     }
 
-    fun detach() { controller = null; pollJob?.cancel(); timeoutJob?.cancel() }
+    fun detach() { controller = null; detached = true; pollJob?.cancel(); timeoutJob?.cancel() }
+
+    /**
+     * 채팅에서 글이 수정됐을 때 검토 중인 에디터에 새 내용을 다시 넣는다.
+     * 사진은 이미 올라가 있는 것을 그대로 쓰므로 텍스트 변경만 반영된다.
+     */
+    fun reinject(content: PostContent) {
+        viewModelScope.launch {
+            val current = job ?: return@launch
+            val updated = current.copy(content = content)
+            job = updated
+            pendingJobs.save(updated)
+            val expected = DocumentModelConverter.expectedComponentCount(content)
+            expectedComponents = expected
+            // 같은 기계를 그대로 쓴다 — 새로 만들면 "글쓰기 화면을 봤다"는 기록을 잃어 발행을 감지하지 못한다.
+            machine?.expectedComponents = expected
+            dispatch(PublishEvent.Reinject(content))
+        }
+    }
 
     private suspend fun start() {
         blogId = settings.blogIdOnce()
@@ -196,7 +222,10 @@ class PublishViewModel @Inject constructor(
             dispatch(PublishEvent.JsError(PublishStage.PREPARE, "사진 준비 실패: ${e.message}")); return
         }
         // 갤러리 Uri 권한은 프로세스가 죽으면 사라진다. 준비된 로컬 파일 경로를 바로 남겨야 나중에 이어서 올릴 수 있다.
-        pendingJobs.setPreparedPaths(j.id, images.map { it.file.absolutePath }.takeIf { it.isNotEmpty() })
+        val paths = images.map { it.file.absolutePath }.takeIf { it.isNotEmpty() }
+        pendingJobs.setPreparedPaths(j.id, paths)
+        // 메모리 사본에도 반영한다 — reinject 가 이 사본을 저장하므로, 안 그러면 방금 남긴 경로가 다시 지워진다.
+        job = job?.copy(preparedPaths = paths)
         controller?.setLocalImages(images)
         dispatch(PublishEvent.ImagesPrepared)
     }

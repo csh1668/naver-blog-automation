@@ -5,11 +5,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.VisualTransformation
 import com.csh.blogwriter.ui.theme.AppSpacing
 import com.csh.blogwriter.ui.theme.AppTheme
 
@@ -22,6 +24,8 @@ fun AppTextField(
     singleLine: Boolean = true,
     minLines: Int = 1,
     modifier: Modifier = Modifier,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
 ) {
     val c = AppTheme.colors
     Column(modifier) {
@@ -34,6 +38,8 @@ fun AppTextField(
             textStyle = AppTheme.typography.body1.copy(color = c.textPrimary),
             placeholder = placeholder?.let { { Text(it, style = AppTheme.typography.body1, color = c.textTertiary) } },
             shape = RoundedCornerShape(AppSpacing.radiusControl),
+            keyboardOptions = keyboardOptions,
+            visualTransformation = visualTransformation,
             colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = c.surfaceWeak, unfocusedContainerColor = c.surfaceWeak,
                 focusedBorderColor = c.fillBrand, unfocusedBorderColor = c.surfaceWeak,
