@@ -180,5 +180,6 @@ Failed(stage, message)                    어느 단계든 제한 시간/JS 오�
 
 ## 14. SP1 이후 인터페이스
 
-- SP2는 `PostContent`를 만들어 `PublishJob`으로 넘기기만 하면 된다 (`Routes.Publish(jobId)`; job은 `PendingJobRepository`에 저장 후 이동).
-- TestCompose 화면은 SP2에서 제거되고 실제 4단계 글쓰기 흐름으로 대체된다.
+- (2026-08-28 결정) SP2의 글쓰기는 **채팅 UI + 오른쪽 사이드 패널**이다(`docs/design-guide.md` §8). 따라서 발행 UI는 부모가 크기를 정하는 `PublishPanel` 컴포저블로 만들고, SP1의 `PublishScreen`은 이를 전체 화면으로 감싼 임시 래퍼다. `PublishViewModel`/상태 기계/WebView 엔진은 SP2에서 그대로 쓴다.
+- SP2는 `PostContent`를 만들어 `PendingJobRepository`에 저장하고 같은 화면 안에서 `PublishPanel(viewModel = hiltViewModel(key = jobId))`을 연다. 부분 수정 시에는 새 `PostContent`로 재주입(`Injecting`부터 재실행)한다 — 이 재주입 이벤트는 SP2에서 상태 기계에 추가한다.
+- TestCompose 화면은 SP2에서 제거되고 채팅 화면으로 대체된다.
