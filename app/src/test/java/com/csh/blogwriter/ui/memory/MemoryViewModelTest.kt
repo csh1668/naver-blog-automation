@@ -47,4 +47,17 @@ class MemoryViewModelTest {
             assertEquals(0, awaitItem().size)
         }
     }
+
+    @Test
+    fun editWithBlankTextLeavesItemUnchanged() = runTest {
+        val vm = MemoryViewModel(repo)
+        vm.items.test {
+            assertEquals(0, awaitItem().size)
+            vm.add("가격은 정확히 적기"); advanceUntilIdle()
+            val added = awaitItem()[0]
+            vm.edit(added.id, "  "); advanceUntilIdle()
+            expectNoEvents()
+            assertEquals("가격은 정확히 적기", vm.items.value[0].text)
+        }
+    }
 }

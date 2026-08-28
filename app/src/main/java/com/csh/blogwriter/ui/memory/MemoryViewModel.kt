@@ -18,7 +18,7 @@ class MemoryViewModel @Inject constructor(private val memory: MemoryRepository) 
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun add(text: String) = viewModelScope.launch { if (text.isNotBlank()) memory.add(MemoryKind.PREFERENCE, text, "manual") }
-    fun edit(id: Long, text: String) = viewModelScope.launch { memory.update(id, text) }
+    fun edit(id: Long, text: String) = viewModelScope.launch { if (text.isNotBlank()) memory.update(id, text) }
     fun toggle(id: Long, enabled: Boolean) = viewModelScope.launch { memory.setEnabled(id, enabled) }
     fun delete(id: Long) = viewModelScope.launch { memory.delete(id) }
 }

@@ -127,7 +127,7 @@ private fun MemoryCard(
             Spacer(Modifier.height(AppSpacing.sm))
             AppTextField(value = editedText, onValueChange = { editedText = it }, label = "내용", singleLine = false, minLines = 2)
             Spacer(Modifier.height(AppSpacing.sm))
-            WeakButton("저장", onClick = { onSave(editedText) })
+            WeakButton("저장", onClick = { onSave(editedText) }, enabled = editedText.isNotBlank())
             Spacer(Modifier.height(AppSpacing.sm))
             WeakButton("취소", onClick = onCancel)
             Spacer(Modifier.height(AppSpacing.sm))

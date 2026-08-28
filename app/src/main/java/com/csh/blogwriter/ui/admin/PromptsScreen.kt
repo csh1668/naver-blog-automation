@@ -93,7 +93,7 @@ private fun PromptCard(state: PromptSectionState, onSave: (String) -> Unit, onRe
             singleLine = false, minLines = 6,
         )
         Spacer(Modifier.height(AppSpacing.md))
-        WeakButton("저장", onClick = { onSave(localText); dirty = false })
+        WeakButton("저장", onClick = { onSave(localText); dirty = false }, enabled = localText.isNotBlank())
         if (state.overridden) {
             Spacer(Modifier.height(AppSpacing.sm))
             DangerButton("기본값으로 되돌리기", onClick = onResetRequest)
