@@ -602,6 +602,72 @@ class ChatViewModelTest {
         assertEquals(1, contexts.size)
     }
 
+    /** 패널에서 계획을 직접 고치면 그것이 새 계획이 되고, 다음 턴에 모델에게도 그대로 실려 나간다. */
+    @Test
+    fun editingThePlanDirectlyReplacesItAndReachesTheModel() = runTest {
+        turns += TurnResult.Success(TurnResponse("계획이에요", plan = PLAN, readyToDraft = true), emptyList(), "flash")
+        turns += TurnResult.Success(TurnResponse("알겠어요", readyToDraft = true), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.send("원주 한우 다녀왔어요"); advanceUntilIdle()
+
+        val edited = "# 원주 한우 후기\n\n## 글 구성\n\n1. 도입 — 사용자가 직접 고친 줄"
+        vm.savePlanEdit(edited); advanceUntilIdle()
+
+        assertEquals(edited, vm.uiState.value.plan)
+        // 고친 계획은 사용자 몫의 PLAN 메시지로 쌓인다 — 원래 계획도 기록에 남는다.
+        val plans = vm.uiState.value.messages.filter { it.kind == MessageKind.PLAN }
+        assertEquals(listOf(MessageRole.ASSISTANT, MessageRole.USER), plans.map { it.role })
+        // 이름은 처음 한 번만 붙는다 — 고쳐도 그대로다.
+        assertEquals("원주 한우 후기", vm.uiState.value.session!!.title)
+
+        vm.send("이대로 가요"); advanceUntilIdle()
+        assertEquals(edited, contexts.last().currentPlan)
+    }
+
+    /** 계획을 세워 둔 대화를 다시 열면 오른쪽 패널이 바로 펼쳐진다 — "보기"를 다시 누르지 않게. */
+    @Test
+    fun openingASessionWithAPlanOpensThePanel() = runTest {
+        turns += TurnResult.Success(TurnResponse("계획이에요", plan = PLAN, readyToDraft = true), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.send("원주 한우 다녀왔어요"); advanceUntilIdle()
+        val sessionId = vm.uiState.value.session!!.id
+
+        val reopened = newViewModel(); reopened.open(sessionId); advanceUntilIdle()
+
+        assertTrue(reopened.uiState.value.panelOpen)
+        assertTrue(reopened.uiState.value.listCollapsed)
+        assertEquals(PLAN, reopened.uiState.value.plan)
+    }
+
+    /** 이어 쓰던 초안이 있는 대화도 마찬가지 — 열자마자 에디터가 오른쪽에 뜬다. */
+    @Test
+    fun openingASessionWithADraftOpensThePanel() = runTest {
+        turns += TurnResult.Success(TurnResponse("초안이에요", post = post()), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.requestDraft(); advanceUntilIdle()
+        val sessionId = vm.uiState.value.session!!.id
+        val jobId = vm.uiState.value.panelJobId
+
+        val reopened = newViewModel(); reopened.open(sessionId); advanceUntilIdle()
+
+        assertEquals(jobId, reopened.uiState.value.panelJobId)
+        assertTrue(reopened.uiState.value.panelOpen)
+        assertTrue(reopened.uiState.value.listCollapsed)
+    }
+
+    /** 아무것도 세워 두지 않은 대화는 전처럼 채팅만 보인다. */
+    @Test
+    fun openingASessionWithoutAPlanOrDraftLeavesThePanelClosed() = runTest {
+        turns += TurnResult.Success(TurnResponse("좋아요"), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.send("원주 한우 다녀왔어요"); advanceUntilIdle()
+        val sessionId = vm.uiState.value.session!!.id
+
+        val reopened = newViewModel(); reopened.open(sessionId); advanceUntilIdle()
+
+        assertFalse(reopened.uiState.value.panelOpen)
+    }
+
     /** 계획 패널 이전 형식({titleCandidates, outline, tone})으로 저장된 계획도 마크다운으로 읽힌다. */
     @Test
     fun legacyStructuredPlanPayloadIsReadAsMarkdown() {

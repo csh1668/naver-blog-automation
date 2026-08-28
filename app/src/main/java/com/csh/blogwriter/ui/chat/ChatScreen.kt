@@ -127,14 +127,22 @@ fun ChatScreen(
     val showEditor = panelMounted && ui.panelJobId != null
     val planMarkdown = if (showEditor) null else ui.plan
 
+    // 입력창에 커서가 있는 동안에는 채팅 쪽을 넓혀 준다 — 오른쪽 패널이 말할 자리를 덜 뺏도록.
+    var composerFocused by remember { mutableStateOf(false) }
+
     BoxWithConstraints(Modifier.fillMaxSize().background(AppTheme.colors.background)) {
         val screenWidth = maxWidth
         val wide = screenWidth >= WIDE_MIN
-        // 채팅 : 에디터 ≈ 3 : 7 (사용자 결정). 에디터는 최소 PANEL_MIN.
-        val panelWidth = maxOf(PANEL_MIN, screenWidth * 0.7f)
+        // 채팅 : 에디터 = 3 : 7 (사용자 결정). 입력창에 커서가 있거나 대화 목록을 펼쳐 두면 5 : 5 로 벌린다.
+        val chatNeedsRoom = composerFocused || !ui.listCollapsed
+        // 에디터는 최소 PANEL_MIN.
+        val targetPanelWidth = maxOf(PANEL_MIN, screenWidth * (if (chatNeedsRoom) 0.5f else 0.7f))
         val panelMountedNow = showEditor || planMarkdown != null
+        // 안쪽(내용)과 바깥쪽(보이는 폭)을 같은 스펙으로 따로 움직인다 —
+        // 접을 때는 바깥만 0 으로 줄어 WebView 는 제 폭 그대로 살아 있는다.
+        val panelWidth by animateDpAsState(targetPanelWidth, tween(200), label = "panelContentWidth")
         val shownPanelWidth by animateDpAsState(
-            targetValue = if (ui.panelOpen) (if (wide) panelWidth else screenWidth) else 0.dp,
+            targetValue = if (ui.panelOpen) (if (wide) targetPanelWidth else screenWidth) else 0.dp,
             animationSpec = tween(200), label = "panelWidth",
         )
 
@@ -160,12 +168,13 @@ fun ChatScreen(
                     panelStatus = panelStatus,
                     onOpenMemory = onOpenMemory,
                     onOpenSessions = null,
+                    onComposerFocusChanged = { composerFocused = it },
                 )
                 if (panelMountedNow) {
                     // 접을 때는 폭만 0 으로 줄인다 — 컴포지션에 남아 있어야 WebView 와 편집 내용이 살아남는다.
                     Box(Modifier.width(shownPanelWidth).fillMaxHeight().clipToBounds()) {
                         Box(Modifier.requiredWidth(panelWidth).fillMaxHeight()) {
-                            if (planMarkdown != null) PlanPanel(planMarkdown)
+                            if (planMarkdown != null) PlanPanel(planMarkdown, onSave = viewModel::savePlanEdit)
                             else PanelHost(ui.panelJobId, viewModel, onSessionExpired, onFailed) { panelStatus = it }
                         }
                     }
@@ -199,6 +208,7 @@ fun ChatScreen(
                     panelStatus = panelStatus,
                     onOpenMemory = onOpenMemory,
                     onOpenSessions = { scope.launch { drawerState.open() } },
+                    onComposerFocusChanged = { composerFocused = it },
                 )
             }
             if (panelMountedNow) {
@@ -213,7 +223,7 @@ fun ChatScreen(
                             Text("채팅으로", style = AppTheme.typography.body1, color = AppTheme.colors.textPrimary)
                         }
                         Box(Modifier.weight(1f)) {
-                            if (planMarkdown != null) PlanPanel(planMarkdown)
+                            if (planMarkdown != null) PlanPanel(planMarkdown, onSave = viewModel::savePlanEdit)
                             else PanelHost(ui.panelJobId, viewModel, onSessionExpired, onFailed) { panelStatus = it }
                         }
                     }
@@ -232,6 +242,7 @@ private fun ChatPane(
     panelStatus: String?,
     onOpenMemory: () -> Unit,
     onOpenSessions: (() -> Unit)?,
+    onComposerFocusChanged: (Boolean) -> Unit,
 ) {
     val c = AppTheme.colors
     val context = LocalContext.current
@@ -313,6 +324,7 @@ private fun ChatPane(
                 placeholder = if (ui.thinking) "글을 구상하고 있어요" else "오늘 있었던 일을 들려주세요",
                 canAttach = ui.panelJobId == null,
                 hero = hero,
+                onFocusChanged = onComposerFocusChanged,
             )
         }
         // 아직 말이 오가지 않은 새 글(사진만 붙여 둔 것도 포함) — 목록 대신 큰 제목과 가운데 입력창을 보여 준다.
@@ -432,7 +444,7 @@ private fun MessageItem(message: ChatMessage, panelOpen: Boolean, viewModel: Cha
         MessageKind.PHOTOS -> ChatPayloads.readPhotos(message.payloadJson)?.let { PhotosBubble(it.uris) }
         // 계획 본문은 오른쪽 패널에 있다 — 목록에는 그 자리를 가리키는 한 줄만 남긴다.
         MessageKind.PLAN -> Text(
-            "계획을 오른쪽에 정리했어요 · 보기",
+            if (message.role == MessageRole.USER) "계획을 직접 고쳤어요 · 보기" else "계획을 오른쪽에 정리했어요 · 보기",
             style = AppTheme.typography.body2,
             color = AppTheme.colors.fillBrand,
             modifier = Modifier.fillMaxWidth().clickable(onClick = viewModel::openPanel)

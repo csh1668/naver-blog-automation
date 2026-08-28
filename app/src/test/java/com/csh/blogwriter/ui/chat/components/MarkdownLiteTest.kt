@@ -53,6 +53,39 @@ class MarkdownLiteTest {
         assertEquals(listOf("**반쪽 굵게" to false), parseMarkdownLite("**반쪽 굵게").single().spans.map { it.text to it.bold })
     }
 
+    /** 계획을 그 자리에서 고치려면 블록 → 마크다운 → 블록이 같은 것으로 돌아와야 한다. */
+    @Test
+    fun blocksSurviveASerializeAndParseRoundTrip() {
+        val markdown = """
+            # 원주 한우, 가족과 다녀온 날
+            다른 제목: 원주 맛집 후기
+            이어지는 줄
+
+            ## 글 구성
+            1. 도입 — 어떻게 가게 됐는지
+            2. 본론 — **무엇을** 먹었는지
+
+            ### 잔가지
+            - 주차 팁
+            - 웨이팅
+
+            따뜻한 존댓말로 씁니다.
+        """.trimIndent()
+        val blocks = parseMarkdownLite(markdown)
+
+        assertEquals(blocks, parseMarkdownLite(blocksToMarkdown(blocks)))
+    }
+
+    /** 편집 칸이 돌려준 글자를 담아도(굵게 표시 포함) 그대로 살아 돌아온다. */
+    @Test
+    fun editedTextGoesBackIntoTheSameKindOfBlock() {
+        val blocks = parseMarkdownLite("# 옛 제목\n- 옛 항목")
+        val edited = blocks.mapIndexed { i, b -> b.withText(if (i == 0) "새 제목" else "**새** 항목") }
+
+        assertEquals("# 새 제목\n\n- **새** 항목", blocksToMarkdown(edited))
+        assertEquals(edited.map { it.javaClass }, parseMarkdownLite(blocksToMarkdown(edited)).map { it.javaClass })
+    }
+
     @Test
     fun parsesTheWholePlanFormat() {
         val blocks = parseMarkdownLite(

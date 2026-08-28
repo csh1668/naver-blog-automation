@@ -153,7 +153,10 @@ class ChatViewModel @Inject constructor(
                 return@launch
             }
             val session = detachVanishedJob(stored)
-            val photos = restoreAttachments(session.id)
+            val history = chatRepo.messagesOnce(session.id)
+            val photos = restoreAttachments(history)
+            // 이어 쓰던 글이나 세워 둔 계획이 있으면 오른쪽을 바로 펼쳐 준다 — "보기"를 다시 누르지 않게.
+            val hasSomethingToShow = session.pendingJobId != null || history.any { it.kind == MessageKind.PLAN }
             // 새 상태로 통째로 갈아 끼운다 — thinking·streamingSay·toolStatus·칩이 함께 초기화된다.
             _uiState.value = ChatUiState(
                 session = session,
@@ -161,6 +164,8 @@ class ChatViewModel @Inject constructor(
                 // 이전에 붙였던 사진은 이미 대화에 반영돼 있으므로 사진판은 비운 채로 연다.
                 trayFrom = photos.size,
                 panelJobId = session.pendingJobId,
+                panelOpen = hasSomethingToShow,
+                listCollapsed = hasSomethingToShow,
                 hasKey = _uiState.value.hasKey,
             )
             observeMessages(session.id)
@@ -293,6 +298,22 @@ class ChatViewModel @Inject constructor(
     fun openPanel() = _uiState.update { if (it.hasPanel) it.copy(panelOpen = true, listCollapsed = true) else it }
 
     fun toggleList() = _uiState.update { it.copy(listCollapsed = !it.listCollapsed) }
+
+    /**
+     * 계획 패널에서 사용자가 직접 고친 계획. 기존 계획을 지우지 않고 사용자 몫의 PLAN 메시지로 쌓는다 —
+     * 패널(`plan`)도 모델에 실려 나가는 `currentPlan` 도 늘 마지막 계획을 본다.
+     */
+    fun savePlanEdit(markdown: String) {
+        val edited = markdown.trim()
+        if (edited.isEmpty()) return
+        val session = _uiState.value.session ?: return
+        viewModelScope.launch {
+            chatRepo.appendMessage(session.id, MessageRole.USER, MessageKind.PLAN, ChatPayloads.plan(edited))
+            // 이름은 아직 없을 때만 붙인다 (계획이 처음 나왔을 때와 같은 규칙).
+            val latest = sessionOf(session.id) ?: return@launch
+            if (latest.title == null) planTitle(edited)?.let { updateSession(latest.copy(title = it)) }
+        }
+    }
 
     fun clearError() = _uiState.update { it.copy(error = null) }
 
@@ -593,9 +614,9 @@ class ChatViewModel @Inject constructor(
      * 같은 사진이 두 번 들어오거나 ref 가 겹친다 — uri 로 한 번 걸러 내고 번호를 다시 매긴다.
      * (뺐던 사진이 되살아나는 것은 남는 문제 — 스펙 §14 참고.)
      */
-    private suspend fun restoreAttachments(sessionId: String): List<AttachedPhoto> =
+    private fun restoreAttachments(history: List<ChatMessage>): List<AttachedPhoto> =
         renumber(
-            chatRepo.messagesOnce(sessionId)
+            history
                 .filter { it.kind == MessageKind.PHOTOS }
                 .mapNotNull { ChatPayloads.readPhotos(it.payloadJson) }
                 .flatMap { payload -> payload.refs.zip(payload.uris) { ref, uri -> AttachedPhoto(ref, uri, null) } }

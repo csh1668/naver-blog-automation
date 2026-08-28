@@ -79,6 +79,30 @@ private fun parseSpans(line: String): List<MdSpan> {
     return spans
 }
 
+/**
+ * 편집 칸에 넣을 한 줄. `**굵게**` 는 표시 그대로 되살려 둔다 — 고치다가 굵게가 사라지지 않게.
+ */
+fun spansToText(spans: List<MdSpan>): String =
+    spans.joinToString("") { if (it.bold) "**${it.text}**" else it.text }
+
+/** 종류는 그대로 두고 글자만 [text] 로 바꾼 블록. 편집 칸이 돌려준 글자를 담을 때 쓴다. */
+fun MdBlock.withText(text: String): MdBlock = when (this) {
+    is MdBlock.Heading -> copy(spans = listOf(MdSpan(text)))
+    is MdBlock.Bullet -> copy(spans = listOf(MdSpan(text)))
+    is MdBlock.Numbered -> copy(spans = listOf(MdSpan(text)))
+    is MdBlock.Paragraph -> copy(spans = listOf(MdSpan(text)))
+}
+
+/** [parseMarkdownLite] 의 반대. 블록 사이는 빈 줄로 띄워 다시 읽어도 같은 블록이 나온다. */
+fun blocksToMarkdown(blocks: List<MdBlock>): String = blocks.joinToString("\n\n") { block ->
+    when (block) {
+        is MdBlock.Heading -> "#".repeat(block.level.coerceIn(1, 3)) + " " + spansToText(block.spans)
+        is MdBlock.Bullet -> "- " + spansToText(block.spans)
+        is MdBlock.Numbered -> "${block.number}. " + spansToText(block.spans)
+        is MdBlock.Paragraph -> spansToText(block.spans)
+    }
+}
+
 @Composable
 fun MarkdownLite(text: String, modifier: Modifier = Modifier) {
     val c = AppTheme.colors

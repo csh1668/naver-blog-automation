@@ -35,7 +35,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import com.csh.blogwriter.speech.SpeechInput
 import com.csh.blogwriter.ui.theme.AppSpacing
@@ -59,9 +61,12 @@ fun Composer(
     canAttach: Boolean = true,
     /** 빈 채팅에서 화면 가운데에 크게 놓일 때. 입력창만 높아지고 버튼 배치는 같다. */
     hero: Boolean = false,
+    /** 입력창에 커서가 들어오고 나갈 때. 넓은 화면에서 채팅과 오른쪽 패널의 비율이 여기에 따라 바뀐다. */
+    onFocusChanged: (Boolean) -> Unit = {},
 ) {
     val c = AppTheme.colors
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
     val speech = remember { SpeechInput(context) }
     // 인식 엔진 조회는 패키지 매니저를 타므로 리컴포지션마다 하지 않는다.
@@ -108,7 +113,8 @@ fun Composer(
             onValueChange = onTextChange,
             enabled = enabled,
             modifier = Modifier.weight(1f)
-                .defaultMinSize(minHeight = if (hero) HeroMinHeight else AppSpacing.ctaHeight),
+                .defaultMinSize(minHeight = if (hero) HeroMinHeight else AppSpacing.ctaHeight)
+                .onFocusChanged { onFocusChanged(it.isFocused) },
             textStyle = AppTheme.typography.body1.copy(color = c.textPrimary),
             placeholder = { Text(placeholder, style = AppTheme.typography.body1, color = c.textTertiary) },
             shape = RoundedCornerShape(24.dp),
@@ -139,7 +145,8 @@ fun Composer(
             Spacer(Modifier.width(AppSpacing.sm))
         }
         IconButton(
-            onClick = onSend,
+            // 보내고 나면 커서를 놓아 준다 — 오른쪽 패널이 다시 넓어진다.
+            onClick = { focusManager.clearFocus(); onSend() },
             enabled = enabled && text.isNotBlank(),
             modifier = Modifier.size(AppSpacing.touchTarget).clip(CircleShape)
                 .background(if (enabled && text.isNotBlank()) c.fillBrand else c.surfaceWeak),
