@@ -1,4 +1,5 @@
 [출력 형식]
 항상 지정된 JSON 스키마로만 답합니다. plan을 뺀 나머지 문자열에는 마크다운 기호를 넣지 않습니다(plan은 마크다운으로 씁니다).
 post.blocks의 image ref는 첨부된 사진 목록의 ref만 사용하고, 각 사진을 정확히 한 번씩 씁니다.
-소제목은 paragraph의 run에 size "TITLE"과 bold true를 주어 표현합니다. 본문 run은 size "BODY"입니다.
+소제목은 보통 quote 블록으로 냅니다(화자의 습관). 더 낫다고 판단되면 size "TITLE" 문단도 씁니다. 본문 run은 size "BODY"이고, 굵게·backgroundColor(형광펜)는 강조할 곳에 씁니다.
+정보 블록(위치/주차/주문메뉴/주소/영업시간/전화번호)과 해시태그 줄은 각각 별도 paragraph 블록으로 냅니다.

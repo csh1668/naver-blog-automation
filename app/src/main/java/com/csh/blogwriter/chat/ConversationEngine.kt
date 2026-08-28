@@ -173,7 +173,8 @@ class ConversationEngine(
                 tools = listOf(GTool(TurnSchemas.functionDeclarations())),
                 toolConfig = GToolConfig(GFunctionCallingConfig("AUTO")),
                 generationConfig = GGenerationConfig(
-                    temperature = temperature, maxOutputTokens = 8192,
+                    temperature = temperature, // 3.x 모델은 thinking 토큰까지 출력 예산에서 쓴다 — 1,800자 초안 + JSON 이 8192 에서 잘리지 않도록 넉넉히.
+                    maxOutputTokens = 16384,
                     responseMimeType = if (useSchema) "application/json" else null,
                     responseJsonSchema = if (useSchema) TurnSchemas.turnResponseJsonSchema() else null,
                 ),
