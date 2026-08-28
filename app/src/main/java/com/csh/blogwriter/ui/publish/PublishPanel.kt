@@ -11,6 +11,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -75,21 +76,28 @@ fun PublishPanel(
             }
             AndroidView(factory = { editor.view }, modifier = Modifier.fillMaxSize())
         }
-        when (state) {
-            is PublishState.Idle, is PublishState.PreparingImages ->
-                ProgressScreen(
-                    "사진을 준비하고 있어요",
-                    (state as? PublishState.PreparingImages)?.let { "${it.total}장 중 ${it.done}장" },
-                    (state as? PublishState.PreparingImages)?.let { if (it.total == 0) null else it.done.toFloat() / it.total },
-                    onCancel = onCancelRequest,
-                )
-            is PublishState.LoadingEditor -> ProgressScreen("네이버 글쓰기 화면을 여는 중이에요", null, null, onCancel = onCancelRequest)
-            is PublishState.DismissingPopups -> ProgressScreen("네이버 글쓰기 화면을 여는 중이에요", null, null)
-            is PublishState.UploadingImages -> ProgressScreen("사진을 올리고 있어요", "${state.total}장 중 ${state.done}장", state.done.toFloat() / state.total)
-            is PublishState.Injecting -> ProgressScreen("글을 채워 넣고 있어요", null, null)
-            is PublishState.Reviewing -> Unit
-            is PublishState.Published -> ResultScreen(success = true, title = "발행했어요", message = "발행한 글 목록에서 다시 볼 수 있어요.", primaryText = "확인", onPrimary = onDone)
-            is PublishState.SessionExpired, is PublishState.Failed -> ProgressScreen("잠시만요", null, null)
+        // 오버레이가 떠 있는 동안에는 아래 에디터로 터치가 새지 않도록 모두 삼킨다 (주입 중 오작동 방지).
+        if (state !is PublishState.Reviewing) {
+            Box(Modifier.fillMaxSize().pointerInput(Unit) {
+                awaitPointerEventScope { while (true) { awaitPointerEvent().changes.forEach { it.consume() } } }
+            }) {
+                when (state) {
+                    is PublishState.Idle, is PublishState.PreparingImages ->
+                        ProgressScreen(
+                            "사진을 준비하고 있어요",
+                            (state as? PublishState.PreparingImages)?.let { "${it.total}장 중 ${it.done}장" },
+                            (state as? PublishState.PreparingImages)?.let { if (it.total == 0) null else it.done.toFloat() / it.total },
+                            onCancel = onCancelRequest,
+                        )
+                    is PublishState.LoadingEditor -> ProgressScreen("네이버 글쓰기 화면을 여는 중이에요", null, null, onCancel = onCancelRequest)
+                    is PublishState.DismissingPopups -> ProgressScreen("네이버 글쓰기 화면을 여는 중이에요", null, null)
+                    is PublishState.UploadingImages -> ProgressScreen("사진을 올리고 있어요", "${state.total}장 중 ${state.done}장", state.done.toFloat() / state.total)
+                    is PublishState.Injecting -> ProgressScreen("글을 채워 넣고 있어요", null, null)
+                    is PublishState.Published -> ResultScreen(success = true, title = "발행했어요", message = "발행한 글 목록에서 다시 볼 수 있어요.", primaryText = "확인", onPrimary = onDone)
+                    is PublishState.SessionExpired, is PublishState.Failed -> ProgressScreen("잠시만요", null, null)
+                    is PublishState.Reviewing -> Unit
+                }
+            }
         }
     }
 }

@@ -3,7 +3,6 @@ package com.csh.blogwriter.ui.publish
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,7 +24,7 @@ fun PublishScreen(
     BackHandler { confirmLeave = true }
     PublishPanel(
         viewModel = viewModel,
-        modifier = Modifier.fillMaxSize().statusBarsPadding(),
+        modifier = Modifier.fillMaxSize(),
         onDone = onDone, onSessionExpired = onSessionExpired, onFailed = onFailed,
         onCancelRequest = { confirmLeave = true },
     )
