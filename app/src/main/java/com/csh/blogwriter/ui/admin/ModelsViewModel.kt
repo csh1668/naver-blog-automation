@@ -3,6 +3,9 @@ package com.csh.blogwriter.ui.admin
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.csh.blogwriter.data.prefs.SettingsStore
+import com.csh.blogwriter.llm.ApiKeyStore
+import com.csh.blogwriter.llm.GeminiClient
+import com.csh.blogwriter.llm.GeminiException
 import com.csh.blogwriter.llm.ModelPolicy
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,24 +24,49 @@ data class ModelsUiState(
     val loaded: Boolean = false,
     val saved: Boolean = false,
     val error: String? = null,
+    val availableModels: List<String> = emptyList(),
+    val modelsLoading: Boolean = false,
+    val modelsError: String? = null,
 )
 
 @HiltViewModel
-class ModelsViewModel @Inject constructor(private val settings: SettingsStore) : ViewModel() {
+class ModelsViewModel @Inject constructor(
+    private val settings: SettingsStore,
+    private val keyStore: ApiKeyStore,
+    private val client: GeminiClient,
+) : ViewModel() {
     private val _uiState = MutableStateFlow(ModelsUiState())
     val uiState: StateFlow<ModelsUiState> = _uiState.asStateFlow()
 
     init {
         viewModelScope.launch {
             val policy = settings.modelPolicyOnce()
-            _uiState.value = ModelsUiState(
-                primaryModel = policy.models.getOrElse(0) { "" },
-                secondaryModel = policy.models.getOrElse(1) { "" },
-                temperature = policy.temperature.toString(),
-                minLength = policy.targetLength.first.toString(),
-                maxLength = policy.targetLength.last.toString(),
-                loaded = true,
-            )
+            _uiState.update {
+                it.copy(
+                    primaryModel = policy.models.getOrElse(0) { "" },
+                    secondaryModel = policy.models.getOrElse(1) { "" },
+                    temperature = policy.temperature.toString(),
+                    minLength = policy.targetLength.first.toString(),
+                    maxLength = policy.targetLength.last.toString(),
+                    loaded = true,
+                )
+            }
+        }
+        refreshModels()
+    }
+
+    fun refreshModels() = viewModelScope.launch {
+        _uiState.update { it.copy(modelsLoading = true, modelsError = null) }
+        val key = keyStore.keysOnce().firstOrNull { it.usable }
+        if (key == null) {
+            _uiState.update { it.copy(modelsLoading = false, modelsError = "등록된 API 키가 없어 목록을 불러올 수 없어요. 직접 입력해 주세요.", availableModels = emptyList()) }
+            return@launch
+        }
+        try {
+            val names = client.modelNames(key.secret)
+            _uiState.update { it.copy(modelsLoading = false, availableModels = names, modelsError = null) }
+        } catch (e: GeminiException) {
+            _uiState.update { it.copy(modelsLoading = false, modelsError = "모델 목록을 불러오지 못했어요: ${e.message}") }
         }
     }
 

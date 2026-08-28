@@ -37,3 +37,6 @@ import kotlinx.serialization.json.JsonObject
     val text: String? get() = candidates.firstOrNull()?.content?.parts?.mapNotNull { it.text }?.joinToString("")?.takeIf { it.isNotEmpty() }
     val functionCalls: List<GFunctionCall> get() = candidates.firstOrNull()?.content?.parts?.mapNotNull { it.functionCall } ?: emptyList()
 }
+
+@Serializable data class GModelInfo(val name: String, val supportedGenerationMethods: List<String> = emptyList())
+@Serializable data class GModelsListResponse(val models: List<GModelInfo> = emptyList(), val nextPageToken: String? = null)

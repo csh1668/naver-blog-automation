@@ -13,6 +13,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -85,11 +86,38 @@ class GeminiClient(
         return GeminiException(code, err?.get("status")?.jsonPrimitive?.content, err?.get("message")?.jsonPrimitive?.content ?: text.take(200))
     }
 
-    private companion object { const val TAG = "GeminiClient" }
+    private companion object {
+        const val TAG = "GeminiClient"
+        val EXCLUDED_KEYWORDS = listOf("image", "tts", "audio", "live", "omni", "embedding", "lyria", "deep-research")
+        val MODEL_PRIORITY = listOf("gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite")
+    }
 
     suspend fun listModels(apiKey: String): KeyProbe = withContext(Dispatchers.IO) {
         val req = Request.Builder().url("$baseUrl/v1beta/models").header("x-goog-api-key", apiKey).get().build()
         try { execute(req); KeyProbe.VALID } catch (e: GeminiException) { if (e.kind == GeminiException.Kind.RATE_LIMITED) KeyProbe.LIMITED else throw e }
+    }
+
+    /** `generateContent` 를 지원하는 gemini-* 텍스트 모델 이름 목록(`models/` 접두사 제거). 추천 모델을 앞세우고 나머지는 이름 역순. */
+    suspend fun modelNames(apiKey: String): List<String> = withContext(Dispatchers.IO) {
+        val infos = mutableListOf<GModelInfo>()
+        var pageToken: String? = null
+        do {
+            val urlBuilder = "$baseUrl/v1beta/models".toHttpUrl().newBuilder().addQueryParameter("pageSize", "200")
+            pageToken?.let { urlBuilder.addQueryParameter("pageToken", it) }
+            val req = Request.Builder().url(urlBuilder.build()).header("x-goog-api-key", apiKey).get().build()
+            val page = json.decodeFromString(GModelsListResponse.serializer(), execute(req))
+            infos += page.models
+            pageToken = page.nextPageToken
+        } while (pageToken != null)
+
+        val names = infos
+            .filter { "generateContent" in it.supportedGenerationMethods }
+            .map { it.name.removePrefix("models/") }
+            .distinct()
+            .filter { it.startsWith("gemini-") && EXCLUDED_KEYWORDS.none { kw -> it.contains(kw) } }
+
+        val (preferred, rest) = names.partition { it in MODEL_PRIORITY }
+        preferred.sortedBy { MODEL_PRIORITY.indexOf(it) } + rest.sortedDescending()
     }
 
     private fun execute(req: Request): String {

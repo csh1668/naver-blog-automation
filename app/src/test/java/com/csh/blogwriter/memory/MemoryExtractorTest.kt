@@ -50,6 +50,7 @@ class MemoryExtractorTest {
         override suspend fun createSession() = throw NotImplementedError()
         override suspend fun getSession(id: String): ChatSession? = null
         override suspend fun updateSession(session: ChatSession) {}
+        override suspend fun setTitle(id: String, title: String) {}
         override suspend fun appendMessage(sessionId: String, role: MessageRole, kind: MessageKind, payloadJson: String): ChatMessage {
             appended += Triple(sessionId, kind, payloadJson)
             return ChatMessage(1, sessionId, 0, role, kind, payloadJson, 0)

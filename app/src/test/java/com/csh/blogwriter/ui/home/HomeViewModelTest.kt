@@ -65,6 +65,7 @@ class HomeViewModelTest {
         override suspend fun createSession() = throw NotImplementedError()
         override suspend fun getSession(id: String): ChatSession? = sessions.value.firstOrNull { it.id == id }
         override suspend fun updateSession(session: ChatSession) {}
+        override suspend fun setTitle(id: String, title: String) {}
         override suspend fun appendMessage(sessionId: String, role: MessageRole, kind: MessageKind, payloadJson: String): ChatMessage =
             ChatMessage(1, sessionId, 0, role, kind, payloadJson, 0)
         override suspend fun messagesOnce(sessionId: String): List<ChatMessage> = emptyList()

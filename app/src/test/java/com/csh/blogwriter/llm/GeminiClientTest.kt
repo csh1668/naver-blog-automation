@@ -72,6 +72,37 @@ class GeminiClientTest {
     }
 
     @Test
+    fun modelNamesFiltersAndOrders() = runTest {
+        server.enqueue(MockResponse().setBody(
+            """{"models":[
+                {"name":"models/gemini-3.7-flash","supportedGenerationMethods":["generateContent"]},
+                {"name":"models/gemini-2.0-flash-image","supportedGenerationMethods":["generateContent"]},
+                {"name":"models/gemini-tts-1","supportedGenerationMethods":["generateContent"]},
+                {"name":"models/gemini-1.5-pro","supportedGenerationMethods":["generateContent"]},
+                {"name":"models/text-embedding-004","supportedGenerationMethods":["embedContent"]}
+            ],"nextPageToken":"TOKEN2"}"""
+        ))
+        server.enqueue(MockResponse().setBody(
+            """{"models":[
+                {"name":"models/gemini-3.5-flash","supportedGenerationMethods":["generateContent"]},
+                {"name":"models/gemini-3.6-flash","supportedGenerationMethods":["generateContent"]},
+                {"name":"models/gemini-embedding-001","supportedGenerationMethods":["generateContent","embedContent"]},
+                {"name":"models/gemini-2.5-pro","supportedGenerationMethods":["generateContent"]}
+            ]}"""
+        ))
+        val names = client.modelNames("SECRET-KEY")
+        assertEquals(
+            listOf("gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-pro", "gemini-1.5-pro"),
+            names,
+        )
+        val first = server.takeRequest()
+        assertTrue(first.path!!.startsWith("/v1beta/models?pageSize=200"))
+        assertEquals("SECRET-KEY", first.getHeader("x-goog-api-key"))
+        val second = server.takeRequest()
+        assertTrue(second.path!!.contains("pageToken=TOKEN2"))
+    }
+
+    @Test
     fun streamsSseChunksInOrder() = runTest {
         val chunk1 = """{"candidates":[{"content":{"role":"model","parts":[{"text":"{\"say\":\"안녕"}]}}]}"""
         val chunk2 = """{"candidates":[{"content":{"role":"model","parts":[{"text":"하세요\"}"}]},"finishReason":"STOP"}],"usageMetadata":{"totalTokenCount":9}}"""
