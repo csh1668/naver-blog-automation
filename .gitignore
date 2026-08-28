@@ -23,3 +23,5 @@ Thumbs.db
 # Secrets
 keystore.properties
 *.env
+
+.superpowers/
