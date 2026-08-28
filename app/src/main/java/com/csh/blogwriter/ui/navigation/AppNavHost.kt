@@ -1,6 +1,5 @@
 package com.csh.blogwriter.ui.navigation
 
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -8,6 +7,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.csh.blogwriter.ui.admin.FailureLogScreen
 import com.csh.blogwriter.ui.compose.TestComposeScreen
+import com.csh.blogwriter.ui.fallback.FallbackScreen
 import com.csh.blogwriter.ui.history.HistoryScreen
 import com.csh.blogwriter.ui.home.HomeScreen
 import com.csh.blogwriter.ui.login.LoginScreen
@@ -53,7 +53,13 @@ fun AppNavHost() {
                 onLeave = { nav.navigate(Routes.Home) { popUpTo(Routes.Home) { inclusive = true } } },
             )
         }
-        composable<Routes.Fallback> { Text("준비 중: 폴백 " + it.toRoute<Routes.Fallback>().jobId) }
+        composable<Routes.Fallback> { entry ->
+            val jobId = entry.toRoute<Routes.Fallback>().jobId
+            FallbackScreen(
+                onRetry = { nav.navigate(Routes.Publish(jobId)) { popUpTo(Routes.Home) } },
+                onHome = { nav.navigate(Routes.Home) { popUpTo(Routes.Home) { inclusive = true } } },
+            )
+        }
         composable<Routes.History> { HistoryScreen(onBack = { nav.popBackStack() }) }
         composable<Routes.FailureLogs> { FailureLogScreen(onBack = { nav.popBackStack() }) }
     }
