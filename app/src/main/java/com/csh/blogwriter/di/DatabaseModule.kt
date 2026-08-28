@@ -1,8 +1,14 @@
 package com.csh.blogwriter.di
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.room.Room
 import com.csh.blogwriter.data.db.AppDatabase
+import com.csh.blogwriter.data.db.FailureLogDao
+import com.csh.blogwriter.data.db.PendingJobDao
 import com.csh.blogwriter.data.db.PublishHistoryDao
 import dagger.Module
 import dagger.Provides
@@ -21,4 +27,15 @@ object DatabaseModule {
 
     @Provides
     fun providePublishHistoryDao(db: AppDatabase): PublishHistoryDao = db.publishHistoryDao()
+
+    @Provides
+    fun provideFailureLogDao(db: AppDatabase): FailureLogDao = db.failureLogDao()
+
+    @Provides
+    fun providePendingJobDao(db: AppDatabase): PendingJobDao = db.pendingJobDao()
+
+    @Provides
+    @Singleton
+    fun provideDataStore(@ApplicationContext context: Context): DataStore<Preferences> =
+        PreferenceDataStoreFactory.create { context.preferencesDataStoreFile("settings") }
 }
