@@ -26,3 +26,6 @@ keystore.properties
 
 .superpowers/
 gradle/gradle-daemon-jvm.properties
+
+# 블로그 원문(개인 자료, 저장소 제외)
+corpus/

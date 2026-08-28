@@ -11,6 +11,7 @@ import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -75,8 +76,29 @@ object ChatPayloads {
 
     fun plan(markdown: String): String = json.encodeToString(JsonObject.serializer(), buildJsonObject { put("markdown", markdown) })
 
-    fun readPlan(payload: String): String? =
-        runCatching { json.parseToJsonElement(payload).jsonObject["markdown"]!!.jsonPrimitive.content }.getOrNull()
+    fun readPlan(payload: String): String? = runCatching {
+        val obj = json.parseToJsonElement(payload).jsonObject
+        obj["markdown"]?.jsonPrimitive?.content ?: legacyPlanMarkdown(obj)
+    }.getOrNull()
+
+    /** 계획 패널 이전에 저장된 구조형 계획({titleCandidates, outline, tone})을 마크다운으로 바꾼다. */
+    private fun legacyPlanMarkdown(obj: JsonObject): String? {
+        val titles = obj["titleCandidates"]?.jsonArray?.map { it.jsonPrimitive.content } ?: return null
+        val outline = obj["outline"]?.jsonArray.orEmpty().mapIndexedNotNull { i, item ->
+            val o = item.jsonObject
+            val heading = o["heading"]?.jsonPrimitive?.content ?: return@mapIndexedNotNull null
+            val summary = o["summary"]?.jsonPrimitive?.content.orEmpty()
+            "${i + 1}. $heading — $summary"
+        }
+        val tone = obj["tone"]?.jsonPrimitive?.content.orEmpty()
+        val lines = mutableListOf("# " + titles.firstOrNull().orEmpty())
+        if (titles.size > 1) lines += "다른 제목: " + titles.drop(1).joinToString(" / ")
+        lines += ""
+        lines += "## 글 구성"
+        lines += outline
+        if (tone.isNotBlank()) { lines += ""; lines += "## 말투와 분위기"; lines += tone }
+        return lines.joinToString("\n") + "\n"
+    }
 
     fun post(content: PostContent): String = PostContentJson.encode(content)
     fun readPost(payload: String): PostContent? = runCatching { PostContentJson.decode(payload) }.getOrNull()

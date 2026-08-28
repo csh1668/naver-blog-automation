@@ -138,7 +138,12 @@ class ChatViewModel @Inject constructor(
         else -> send(text)
     }
 
-    fun requestDraft() = runTurn(DRAFT_CHIP, draftTurn = true)
+    /** 초안이 이미 있거나 답을 기다리는 중이면 초안 턴을 열지 않는다(모델이 잘못 보낸 칩으로도). */
+    fun requestDraft() {
+        val s = _uiState.value
+        if (s.panelJobId != null || s.thinking) return
+        runTurn(DRAFT_CHIP, draftTurn = true)
+    }
 
     fun attachPhotos(uris: List<String>) {
         if (uris.isEmpty()) return

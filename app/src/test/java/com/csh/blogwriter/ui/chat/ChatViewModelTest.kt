@@ -448,6 +448,25 @@ class ChatViewModelTest {
         collector.cancel()
     }
 
+    /** 초안이 이미 있으면 초안 버튼(또는 모델이 잘못 보낸 칩)으로 초안 턴을 다시 열지 않는다. */
+    @Test
+    fun requestDraftIsIgnoredOnceADraftExists() = runTest {
+        turns += TurnResult.Success(TurnResponse("초안이에요", post = post("제목")), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.requestDraft(); advanceUntilIdle()
+        assertNotNull(vm.uiState.value.panelJobId)
+        vm.sendQuickReply(ChatViewModel.DRAFT_CHIP); advanceUntilIdle()
+        assertEquals(1, contexts.size)
+    }
+
+    /** 계획 패널 이전 형식({titleCandidates, outline, tone})으로 저장된 계획도 마크다운으로 읽힌다. */
+    @Test
+    fun legacyStructuredPlanPayloadIsReadAsMarkdown() {
+        val md = ChatPayloads.readPlan("""{"titleCandidates":["첫 제목","둘째"],"outline":[{"heading":"가는 길","summary":"주차 팁"}],"tone":"다정하게"}""")
+        val expected = listOf("# 첫 제목", "다른 제목: 둘째", "", "## 글 구성", "1. 가는 길 — 주차 팁", "", "## 말투와 분위기", "다정하게").joinToString("\n") + "\n"
+        assertEquals(expected, md)
+    }
+
     /** 못 읽은 사진 자리를 비워 두면 다음 첨부에서 번호가 겹친다 — 붙일 때마다 전체를 다시 매긴다. */
     @Test
     fun refsStayContiguousWhenAnUnreadablePhotoIsDropped() = runTest {

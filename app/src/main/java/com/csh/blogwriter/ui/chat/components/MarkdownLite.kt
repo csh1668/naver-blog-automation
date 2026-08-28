@@ -53,7 +53,7 @@ fun parseMarkdownLite(text: String): List<MdBlock> {
             line.isEmpty() -> flush()
             heading != null -> { flush(); blocks += MdBlock.Heading(heading.groupValues[1].length, parseSpans(heading.groupValues[2])) }
             bullet != null -> { flush(); blocks += MdBlock.Bullet(parseSpans(bullet.groupValues[1])) }
-            numbered != null -> { flush(); blocks += MdBlock.Numbered(numbered.groupValues[1].toInt(), parseSpans(numbered.groupValues[2])) }
+            numbered != null -> { flush(); blocks += MdBlock.Numbered((numbered.groupValues[1].toIntOrNull() ?: 0), parseSpans(numbered.groupValues[2])) }
             else -> paragraph += line
         }
     }
