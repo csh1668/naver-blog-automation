@@ -9,6 +9,7 @@ import androidx.navigation.toRoute
 import com.csh.blogwriter.ui.admin.FailureLogScreen
 import com.csh.blogwriter.ui.history.HistoryScreen
 import com.csh.blogwriter.ui.home.HomeScreen
+import com.csh.blogwriter.ui.login.LoginScreen
 
 @Composable
 fun AppNavHost() {
@@ -23,7 +24,19 @@ fun AppNavHost() {
                 onAdmin = { nav.navigate(Routes.FailureLogs) },
             )
         }
-        composable<Routes.Login> { Text("준비 중: 로그인") }
+        composable<Routes.Login> { entry ->
+            val returnTo = entry.toRoute<Routes.Login>().returnTo
+            LoginScreen(
+                onBack = { nav.popBackStack() },
+                onDone = {
+                    nav.popBackStack()
+                    when {
+                        returnTo == "compose" -> nav.navigate(Routes.TestCompose)
+                        returnTo?.startsWith("publish:") == true -> nav.navigate(Routes.Publish(returnTo.removePrefix("publish:")))
+                    }
+                },
+            )
+        }
         composable<Routes.TestCompose> { Text("준비 중: 글쓰기") }
         composable<Routes.Publish> { Text("준비 중: 발행 " + it.toRoute<Routes.Publish>().jobId) }
         composable<Routes.Fallback> { Text("준비 중: 폴백 " + it.toRoute<Routes.Fallback>().jobId) }
