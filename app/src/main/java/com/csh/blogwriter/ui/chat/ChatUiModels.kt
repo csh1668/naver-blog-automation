@@ -1,9 +1,9 @@
 package com.csh.blogwriter.ui.chat
 
 import com.csh.blogwriter.chat.AttachedPhoto
-import com.csh.blogwriter.chat.Plan
 import com.csh.blogwriter.data.repo.ChatMessage
 import com.csh.blogwriter.data.repo.ChatSession
+import com.csh.blogwriter.data.repo.MessageKind
 import com.csh.blogwriter.domain.model.PostContent
 import com.csh.blogwriter.domain.model.PostContentJson
 import kotlinx.serialization.builtins.ListSerializer
@@ -33,6 +33,12 @@ data class ChatUiState(
 ) {
     /** 입력창 위 사진판에 걸어 둘 사진들. */
     val tray: List<AttachedPhoto> get() = attachments.drop(trayFrom.coerceIn(0, attachments.size))
+
+    /** 오른쪽 패널에 그릴 최신 계획(마크다운). 초안이 나온 뒤에도 남아 있지만 패널은 에디터가 차지한다. */
+    val plan: String? get() = messages.lastOrNull { it.kind == MessageKind.PLAN }?.let { ChatPayloads.readPlan(it.payloadJson) }
+
+    /** 오른쪽에 보여 줄 것이 있는가 — 계획이든 초안이든. */
+    val hasPanel: Boolean get() = panelJobId != null || plan != null
 }
 
 /** 사진 첨부 메시지의 내용. */
@@ -67,8 +73,10 @@ object ChatPayloads {
         PhotosPayload(obj["count"]?.jsonPrimitive?.content?.toIntOrNull() ?: refs.size, refs, uris)
     }.getOrNull()
 
-    fun plan(plan: Plan): String = json.encodeToString(Plan.serializer(), plan)
-    fun readPlan(payload: String): Plan? = runCatching { json.decodeFromString(Plan.serializer(), payload) }.getOrNull()
+    fun plan(markdown: String): String = json.encodeToString(JsonObject.serializer(), buildJsonObject { put("markdown", markdown) })
+
+    fun readPlan(payload: String): String? =
+        runCatching { json.parseToJsonElement(payload).jsonObject["markdown"]!!.jsonPrimitive.content }.getOrNull()
 
     fun post(content: PostContent): String = PostContentJson.encode(content)
     fun readPost(payload: String): PostContent? = runCatching { PostContentJson.decode(payload) }.getOrNull()

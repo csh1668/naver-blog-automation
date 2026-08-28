@@ -25,6 +25,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -113,14 +114,34 @@ class ConversationEngineTest {
 
     @Test
     fun happyTurnBuildsRequestAndParsesResponse() = runTest {
-        server.enqueue(textResponse("""{"say":"이렇게 써 볼까요?","plan":{"titleCandidates":["a","b","c"],"outline":[],"tone":"t"},"quickReplies":["1번"],"readyToDraft":false}"""))
+        server.enqueue(textResponse("""{"say":"이렇게 써 볼까요?","plan":"# 제목\n\n## 글 구성\n1. 도입","quickReplies":["더 짧게"],"readyToDraft":true}"""))
         val r = engine.runTurn(ctx(), Recorder()) as TurnResult.Success
         assertEquals("이렇게 써 볼까요?", r.response.say); assertEquals("flash", r.usedModel)
+        assertEquals("# 제목\n\n## 글 구성\n1. 도입", r.response.plan)
         val req = server.takeRequest(); val body = req.body.readUtf8()
         assertEquals("SECRET1", req.getHeader("x-goog-api-key"))
         assertTrue(body.contains("\"inlineData\"")); assertTrue(body.contains("\"responseJsonSchema\"")); assertTrue(body.contains("web_search"))
         assertTrue(body.contains("[ROLE]")); assertTrue(body.contains("가격은 정확히"))
         assertEquals(listOf(7L), memory.touched)
+    }
+
+    /** 계획은 마크다운 그대로 히스토리에 실리고, 지금 계획은 "전체를 다시 내라"는 부탁과 함께 붙는다. */
+    @Test
+    fun planHistoryAndCurrentPlanGoIntoTheRequestAsMarkdown() = runTest {
+        server.enqueue(textResponse("""{"say":"고쳤어요","quickReplies":[],"readyToDraft":true}"""))
+        val markdown = "# 제목\n## 글 구성\n1. 도입"
+        val payload = """{"markdown":"# 제목\n## 글 구성\n1. 도입"}"""
+        val ctx = ctx().copy(
+            history = ctx().history + ChatMessage(2, "s", 1, MessageRole.ASSISTANT, MessageKind.PLAN, payload, 0),
+            currentPlan = markdown,
+        )
+        engine.runTurn(ctx, Recorder())
+
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(body.contains("[계획]"))
+        assertFalse(body.contains("markdown"))
+        assertTrue(body.contains("현재 계획:"))
+        assertTrue(body.contains("계획 전체를 다시 내 주세요"))
     }
 
     @Test

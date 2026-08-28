@@ -55,6 +55,7 @@ class ChatViewModel @Inject constructor(
 
     companion object {
         const val RETRY_CHIP = "다시 시도"
+        /** 입력창 위 고정 버튼의 이름이자, 눌렀을 때 대화에 남는 말. */
         const val DRAFT_CHIP = "이대로 초안 써 줘"
         const val NO_KEY = "글을 쓰려면 관리자가 열쇠를 등록해야 해요"
         const val NO_PHOTO_AFTER_DRAFT = "초안을 만든 뒤에는 사진을 더 붙일 수 없어요. 새 글에서 이어 가 주세요."
@@ -204,8 +205,11 @@ class ChatViewModel @Inject constructor(
 
     fun togglePanel() {
         val open = !_uiState.value.panelOpen
-        _uiState.update { it.copy(panelOpen = open && it.panelJobId != null, listCollapsed = if (open) true else it.listCollapsed) }
+        _uiState.update { it.copy(panelOpen = open && it.hasPanel, listCollapsed = if (open) true else it.listCollapsed) }
     }
+
+    /** 계획 줄이나 "초안 열기"에서 부른다 — 이미 열려 있으면 그대로 둔다(토글과 다르다). */
+    fun openPanel() = _uiState.update { if (it.hasPanel) it.copy(panelOpen = true, listCollapsed = true) else it }
 
     fun toggleList() = _uiState.update { it.copy(listCollapsed = !it.listCollapsed) }
 
@@ -319,6 +323,8 @@ class ChatViewModel @Inject constructor(
             attachments = photoAttachments.attachments(session.id, _uiState.value.attachments),
             style = style,
             draftTurn = draftTurn,
+            // 초안이 나오기 전까지는 계획을 함께 보낸다 — 모델이 "이 계획을 고쳐라"로 읽는다.
+            currentPlan = if (_uiState.value.panelJobId == null) lastPlan(history) else null,
             // 재주입 조건과 같아야 한다 — 패널을 접어 두고 "문단 2를 더 짧게" 라고 해도 지금 초안을 함께 보낸다.
             currentPost = if (_uiState.value.panelJobId != null) lastPost(history) else null,
         )
@@ -327,25 +333,22 @@ class ChatViewModel @Inject constructor(
     private suspend fun onSuccess(sessionId: String, response: TurnResponse) {
         val session = sessionOf(sessionId) ?: return
         // post 는 사용자가 초안을 요청한 턴, 또는 이미 초안이 있어 고치는 턴에서만 받는다.
-        // 모델이 계획 단계에서 성급하게 post 를 내면 버리고, 대신 "초안 써 줘" 칩만 띄운다.
+        // 모델이 계획 단계에서 성급하게 post 를 내면 버린다 — 초안은 입력창 위 버튼으로만 시작한다.
         val hasDraft = session.pendingJobId != null
         val post = response.post?.takeIf { lastDraftTurn || hasDraft }
         readyToDraft = response.readyToDraft || (response.post != null && post == null)
         chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.TEXT, ChatPayloads.text(response.say))
         // 실제 말풍선이 생긴 뒤에 임시 말풍선을 지운다 — 중간에 빈 화면이 보이지 않게.
         _uiState.update { it.copy(streamingSay = null) }
-        response.plan?.let { chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.PLAN, ChatPayloads.plan(it)) }
-        post?.let { chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.POST, ChatPayloads.post(it)) }
-        // 초안이 이미 있으면(이번 턴에 만들었든 전에 만들었든) "이대로 초안 써 줘" 칩은 더 이상 의미가 없다.
-        val draftExists = hasDraft || post != null
-        val chips = when {
-            draftExists -> response.quickReplies.filterNot { it == DRAFT_CHIP }
-            readyToDraft -> (response.quickReplies + DRAFT_CHIP).distinct()
-            else -> response.quickReplies
+        response.plan?.let {
+            chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.PLAN, ChatPayloads.plan(it))
+            // 계획이 나오면 오른쪽에 바로 펼쳐 준다 (초안이 이미 있으면 그 자리는 에디터가 지킨다).
+            _uiState.update { state -> state.copy(panelOpen = true, listCollapsed = true) }
         }
-        _uiState.update { it.copy(quickReplies = chips) }
+        post?.let { chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.POST, ChatPayloads.post(it)) }
+        _uiState.update { it.copy(quickReplies = response.quickReplies) }
         // 제목은 한 번만 자동으로 붙는다 — session.title 이 이미 있으면(자동이든 사용자가 바꿨든) 건드리지 않는다.
-        val title = session.title ?: post?.title ?: response.plan?.titleCandidates?.firstOrNull()
+        val title = session.title ?: response.plan?.let(::planTitle) ?: post?.title
         if (title != session.title) updateSession(session.copy(title = title))
         post?.let { onPostRevised(sessionId, it) }
     }
@@ -417,6 +420,13 @@ class ChatViewModel @Inject constructor(
 
     private fun lastPost(history: List<ChatMessage>): PostContent? =
         history.lastOrNull { it.kind == MessageKind.POST }?.let { ChatPayloads.readPost(it.payloadJson) }
+
+    private fun lastPlan(history: List<ChatMessage>): String? =
+        history.lastOrNull { it.kind == MessageKind.PLAN }?.let { ChatPayloads.readPlan(it.payloadJson) }
+
+    /** 계획 첫 줄의 `# 제목` — 세션 이름으로 쓴다. */
+    private fun planTitle(markdown: String): String? =
+        markdown.lineSequence().firstOrNull { it.startsWith("# ") }?.removePrefix("# ")?.trim()?.ifEmpty { null }
 
     /**
      * 사진 메시지는 붙일 때마다 새로 쌓이고 번호도 그때그때 다시 매긴 값이라, 그대로 이어 붙이면

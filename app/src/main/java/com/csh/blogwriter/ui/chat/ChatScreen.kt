@@ -5,6 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -70,7 +71,7 @@ import com.csh.blogwriter.domain.publish.PublishState
 import com.csh.blogwriter.ui.chat.components.Composer
 import com.csh.blogwriter.ui.chat.components.MessageBubble
 import com.csh.blogwriter.ui.chat.components.PhotosBubble
-import com.csh.blogwriter.ui.chat.components.PlanCard
+import com.csh.blogwriter.ui.chat.components.PlanPanel
 import com.csh.blogwriter.ui.chat.components.QuickReplyChips
 import com.csh.blogwriter.ui.chat.components.SessionListPane
 import com.csh.blogwriter.ui.chat.components.SessionListWidth
@@ -78,6 +79,7 @@ import com.csh.blogwriter.ui.chat.components.SessionRailWidth
 import com.csh.blogwriter.ui.chat.components.SystemMessage
 import com.csh.blogwriter.ui.chat.components.ToolStatusLine
 import com.csh.blogwriter.ui.components.BannerKind
+import com.csh.blogwriter.ui.components.BottomCta
 import com.csh.blogwriter.ui.components.InlineBanner
 import com.csh.blogwriter.ui.components.PhotoGrid
 import com.csh.blogwriter.ui.components.WeakButton
@@ -115,13 +117,16 @@ fun ChatScreen(
         if (ui.panelOpen) panelMounted = true
         if (ui.panelJobId == null) { panelMounted = false; panelStatus = null }
     }
+    // 오른쪽 자리는 초안이 있으면 에디터가, 아직 계획뿐이면 계획이 차지한다.
+    val showEditor = panelMounted && ui.panelJobId != null
+    val planMarkdown = if (showEditor) null else ui.plan
 
     BoxWithConstraints(Modifier.fillMaxSize().background(AppTheme.colors.background)) {
         val screenWidth = maxWidth
         val wide = screenWidth >= WIDE_MIN
         // 채팅 : 에디터 ≈ 3 : 7 (사용자 결정). 에디터는 최소 PANEL_MIN.
         val panelWidth = maxOf(PANEL_MIN, screenWidth * 0.7f)
-        val panelMountedNow = panelMounted && ui.panelJobId != null
+        val panelMountedNow = showEditor || planMarkdown != null
         val shownPanelWidth by animateDpAsState(
             targetValue = if (ui.panelOpen) (if (wide) panelWidth else screenWidth) else 0.dp,
             animationSpec = tween(200), label = "panelWidth",
@@ -154,7 +159,8 @@ fun ChatScreen(
                     // 접을 때는 폭만 0 으로 줄인다 — 컴포지션에 남아 있어야 WebView 와 편집 내용이 살아남는다.
                     Box(Modifier.width(shownPanelWidth).fillMaxHeight().clipToBounds()) {
                         Box(Modifier.requiredWidth(panelWidth).fillMaxHeight()) {
-                            PanelHost(ui.panelJobId, viewModel, onSessionExpired, onFailed) { panelStatus = it }
+                            if (planMarkdown != null) PlanPanel(planMarkdown)
+                            else PanelHost(ui.panelJobId, viewModel, onSessionExpired, onFailed) { panelStatus = it }
                         }
                     }
                 }
@@ -201,7 +207,8 @@ fun ChatScreen(
                             Text("채팅으로", style = AppTheme.typography.body1, color = AppTheme.colors.textPrimary)
                         }
                         Box(Modifier.weight(1f)) {
-                            PanelHost(ui.panelJobId, viewModel, onSessionExpired, onFailed) { panelStatus = it }
+                            if (planMarkdown != null) PlanPanel(planMarkdown)
+                            else PanelHost(ui.panelJobId, viewModel, onSessionExpired, onFailed) { panelStatus = it }
                         }
                     }
                 }
@@ -255,11 +262,12 @@ private fun ChatPane(
                 modifier = Modifier.weight(1f).padding(horizontal = AppSpacing.sm),
             )
             TextButton(onClick = onOpenMemory) { Text("기억한 것들", style = AppTheme.typography.body2, color = c.fillBrand) }
-            if (ui.panelJobId != null) {
+            if (ui.hasPanel) {
+                val what = if (ui.panelJobId != null) "초안" else "계획"
                 IconButton(onClick = viewModel::togglePanel, modifier = Modifier.size(AppSpacing.touchTarget)) {
                     Icon(
                         Icons.AutoMirrored.Rounded.Article,
-                        contentDescription = if (ui.panelOpen) "초안 접기" else "초안 열기",
+                        contentDescription = if (ui.panelOpen) "$what 접기" else "$what 열기",
                         tint = if (ui.panelOpen) c.fillBrand else c.textSecondary,
                     )
                 }
@@ -292,6 +300,16 @@ private fun ChatPane(
         }
         QuickReplyChips(ui.quickReplies) { justSent = true; viewModel.sendQuickReply(it) }
         AttachmentTray(ui.tray, viewModel)
+        // 계획이 있고 아직 초안이 없는 동안에는 초안 버튼이 입력창 위에 늘 걸려 있다.
+        if (ui.plan != null && ui.panelJobId == null && !ui.thinking) {
+            Box(Modifier.padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
+                BottomCta(
+                    ChatViewModel.DRAFT_CHIP,
+                    onClick = { justSent = true; viewModel.requestDraft() },
+                    enabled = ui.hasKey,
+                )
+            }
+        }
         // 초안이 나온 뒤 붙인 사진은 에디터에 올라가 있지 않아 다음 수정본 주입이 깨진다 — 버튼을 막고 이유를 알려 준다.
         if (ui.panelJobId != null) {
             Text(
@@ -351,9 +369,14 @@ private fun MessageItem(message: ChatMessage, panelOpen: Boolean, viewModel: Cha
     when (message.kind) {
         MessageKind.TEXT -> MessageBubble(ChatPayloads.readText(message.payloadJson), mine = message.role == MessageRole.USER)
         MessageKind.PHOTOS -> ChatPayloads.readPhotos(message.payloadJson)?.let { PhotosBubble(it.uris) }
-        MessageKind.PLAN -> ChatPayloads.readPlan(message.payloadJson)?.let { plan ->
-            PlanCard(plan) { index, title -> viewModel.sendQuickReply("${index}번 제목으로: $title") }
-        }
+        // 계획 본문은 오른쪽 패널에 있다 — 목록에는 그 자리를 가리키는 한 줄만 남긴다.
+        MessageKind.PLAN -> Text(
+            "계획을 오른쪽에 정리했어요 · 보기",
+            style = AppTheme.typography.body2,
+            color = AppTheme.colors.fillBrand,
+            modifier = Modifier.fillMaxWidth().clickable(onClick = viewModel::openPanel)
+                .padding(horizontal = AppSpacing.sm, vertical = AppSpacing.md),
+        )
         MessageKind.POST -> SystemMessage {
             Column {
                 InlineBanner("초안을 만들었어요", BannerKind.Success)

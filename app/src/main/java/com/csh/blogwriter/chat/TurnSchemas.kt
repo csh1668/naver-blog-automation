@@ -44,20 +44,13 @@ object TurnSchemas {
         putJsonObject("properties") { put("title", str()); put("blocks", arrayOf(block)) }
         putJsonArray("required") { add("title"); add("blocks") }
     }
-    private val plan = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            put("titleCandidates", arrayOf(str()))
-            put("outline", arrayOf(buildJsonObject { put("type", "object"); putJsonObject("properties") { put("heading", str()); put("summary", str()); put("photoRefs", arrayOf(str())) }; putJsonArray("required") { add("heading"); add("summary") } }))
-            put("tone", str())
-        }
-        putJsonArray("required") { add("titleCandidates"); add("outline"); add("tone") }
-    }
 
     fun turnResponseJsonSchema(): JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            put("say", str("말풍선 본문, 2~4문장")); put("plan", nullable(plan)); put("question", nullable(str("한 턴에 질문 하나")))
+            put("say", str("말풍선 본문, 2~4문장"))
+            put("plan", nullable(str("글 계획 전문(마크다운). 고칠 때도 전체를 다시 낸다")))
+            put("question", nullable(str("한 턴에 질문 하나")))
             put("quickReplies", arrayOf(str())); put("readyToDraft", buildJsonObject { put("type", "boolean") }); put("post", nullable(postContent))
         }
         putJsonArray("required") { add("say"); add("quickReplies"); add("readyToDraft") }

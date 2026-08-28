@@ -4,11 +4,10 @@ import com.csh.blogwriter.domain.model.PostContent
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-@Serializable data class OutlineItem(val heading: String, val summary: String, val photoRefs: List<String> = emptyList())
-@Serializable data class Plan(val titleCandidates: List<String>, val outline: List<OutlineItem>, val tone: String)
 @Serializable data class TurnResponse(
     val say: String,
-    val plan: Plan? = null,
+    /** 글 계획 전문(마크다운). 피드백 턴마다 전체를 다시 낸다 — 부분 수정이 아니다. */
+    val plan: String? = null,
     val question: String? = null,
     val quickReplies: List<String> = emptyList(),
     val readyToDraft: Boolean = false,

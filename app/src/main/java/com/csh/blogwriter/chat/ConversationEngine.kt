@@ -222,7 +222,7 @@ class ConversationEngine(
             buildJsonObject { put("error", e.message ?: "tool failed") }
         }
 
-    /** 대화 기록 → contents. 사진은 첫 user 파트에 inlineData 로, ref 라벨을 텍스트로 함께 붙인다. 현재 post 가 있으면 마지막에 전문을 붙인다. */
+    /** 대화 기록 → contents. 사진은 첫 user 파트에 inlineData 로, ref 라벨을 텍스트로 함께 붙인다. 현재 계획·post 가 있으면 마지막에 전문을 붙인다. */
     private fun buildContents(ctx: ChatContext): List<GContent> {
         val out = mutableListOf<GContent>()
         if (ctx.attachments.isNotEmpty()) {
@@ -236,10 +236,16 @@ class ConversationEngine(
             val text = when (m.kind) {
                 MessageKind.TEXT -> runCatching { json.parseToJsonElement(m.payloadJson).jsonObject["text"]!!.jsonPrimitive.content }.getOrDefault(m.payloadJson)
                 MessageKind.PHOTOS -> "(사진 ${runCatching { json.parseToJsonElement(m.payloadJson).jsonObject["count"]!!.jsonPrimitive.content }.getOrDefault("")}장 첨부)"
-                MessageKind.PLAN, MessageKind.POST -> m.payloadJson
+                // 계획은 마크다운 전문 그대로 보여 준다 (payload 는 {"markdown": …} 래퍼일 뿐이다).
+                MessageKind.PLAN -> "[계획]\n" + runCatching { json.parseToJsonElement(m.payloadJson).jsonObject["markdown"]!!.jsonPrimitive.content }.getOrDefault(m.payloadJson)
+                MessageKind.POST -> m.payloadJson
                 MessageKind.SYSTEM -> return@forEach
             }
             out += GContent(role, listOf(GPart(text = text)))
+        }
+        if (ctx.currentPlan != null) {
+            val ask = if (ctx.draftTurn) "" else "\n요청을 반영해 계획 전체를 다시 내 주세요."
+            out += GContent("user", listOf(GPart(text = "현재 계획:\n" + ctx.currentPlan + ask)))
         }
         if (ctx.currentPost != null) {
             out += GContent("user", listOf(GPart(text = "현재 초안(JSON): " + PostContentJson.encode(ctx.currentPost) + "\n요청을 반영해 수정된 전체 post 를 다시 내 주세요.")))

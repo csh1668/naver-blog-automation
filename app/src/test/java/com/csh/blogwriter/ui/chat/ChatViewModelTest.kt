@@ -4,7 +4,6 @@ import com.csh.blogwriter.chat.AttachedPhoto
 import com.csh.blogwriter.chat.Attachment
 import com.csh.blogwriter.chat.ChatContext
 import com.csh.blogwriter.chat.PhotoAttachments
-import com.csh.blogwriter.chat.Plan
 import com.csh.blogwriter.chat.PublishedHook
 import com.csh.blogwriter.chat.TurnListener
 import com.csh.blogwriter.chat.TurnResponse
@@ -187,13 +186,18 @@ class ChatViewModelTest {
 
     private fun post(title: String = "제목") = PostContent(title, listOf(Block.Paragraph(listOf(Run("본문")))))
 
+    private companion object {
+        const val PLAN = "# 원주 한우 후기\n다른 제목: A / B\n\n## 글 구성\n1. 도입 — 왜 갔는지 (사진 img_001)"
+        const val PLAN2 = "# 짧게 쓴 원주 한우\n다른 제목: A / B\n\n## 글 구성\n1. 도입"
+    }
+
     @Before fun setUp() { Dispatchers.setMain(StandardTestDispatcher()) }
     @After fun tearDown() { Dispatchers.resetMain() }
 
     @Test
     fun sendStoresUserAndAssistantMessagesAndQuickReplies() = runTest {
         turns += TurnResult.Success(
-            TurnResponse("이렇게 써 볼까요?", plan = Plan(listOf("a", "b", "c"), emptyList(), "t"), quickReplies = listOf("1번 제목으로")),
+            TurnResponse("오른쪽에 계획을 정리했어요.", plan = PLAN, quickReplies = listOf("더 짧게")),
             emptyList(), "flash",
         )
         val vm = newViewModel(); vm.open(null); advanceUntilIdle()
@@ -208,7 +212,7 @@ class ChatViewModelTest {
             ),
             kinds,
         )
-        assertEquals(listOf("1번 제목으로"), vm.uiState.value.quickReplies)
+        assertEquals(listOf("더 짧게"), vm.uiState.value.quickReplies)
         assertEquals(false, vm.uiState.value.thinking)
         assertNull(vm.uiState.value.streamingSay)
         assertNull(vm.uiState.value.toolStatus)
@@ -280,7 +284,7 @@ class ChatViewModelTest {
     /** 답을 기다리는 사이 다른 대화로 옮기면 그 답은 조용히 버린다 — 남의 대화에 붙으면 안 된다. */
     @Test
     fun switchingSessionMidTurnDropsTheLateAnswer() = runTest {
-        turns += TurnResult.Success(TurnResponse("늦게 온 답", plan = Plan(listOf("a"), emptyList(), "t")), emptyList(), "flash")
+        turns += TurnResult.Success(TurnResponse("늦게 온 답", plan = PLAN), emptyList(), "flash")
         gate = CompletableDeferred()
         val vm = newViewModel(); vm.open(null); advanceUntilIdle()
         val first = vm.uiState.value.session!!.id
@@ -357,25 +361,78 @@ class ChatViewModelTest {
         collector.cancel()
     }
 
-    /** 계획 단계에서 모델이 성급하게 post 를 내면 버리고, 초안 칩만 띄운다(제목 고르자마자 에디터가 뜨던 문제). */
+    /** 첫 턴의 계획은 오른쪽 패널로 가고, 계획 첫 줄이 대화 이름이 된다. */
     @Test
-    fun earlyPostOnPlanningTurnIsIgnoredButDraftChipIsOffered() = runTest {
-        turns += TurnResult.Success(TurnResponse("좋은 제목이에요", quickReplies = listOf("다른 제목"), post = post("성급한 초안")), emptyList(), "flash")
+    fun theFirstPlanOpensThePanelAndNamesTheSession() = runTest {
+        turns += TurnResult.Success(TurnResponse("오른쪽에 계획을 정리했어요.", plan = PLAN, readyToDraft = true), emptyList(), "flash")
         val vm = newViewModel(); vm.open(null); advanceUntilIdle()
-        vm.send("1번 제목으로"); advanceUntilIdle()
+        vm.send("원주 한우 다녀왔어요"); advanceUntilIdle()
+
+        assertEquals(PLAN, vm.uiState.value.plan)
+        assertTrue(vm.uiState.value.panelOpen)
+        assertTrue(vm.uiState.value.listCollapsed)
+        assertNull(vm.uiState.value.panelJobId)
+        assertEquals("원주 한우 후기", vm.uiState.value.session!!.title)
+    }
+
+    /** 피드백 턴에서는 계획 전체가 새로 오고, 모델에는 고치기 전 계획이 함께 실려 나간다. */
+    @Test
+    fun aFeedbackTurnReplacesThePlanAndSendsTheOldOneAlong() = runTest {
+        turns += TurnResult.Success(TurnResponse("계획이에요", plan = PLAN, readyToDraft = true), emptyList(), "flash")
+        turns += TurnResult.Success(TurnResponse("짧게 고쳤어요", plan = PLAN2, readyToDraft = true), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.send("원주 한우 다녀왔어요"); advanceUntilIdle()
+
+        vm.send("더 짧게"); advanceUntilIdle()
+
+        assertEquals(PLAN, contexts.last().currentPlan)
+        assertEquals(PLAN2, vm.uiState.value.plan)
+        // 계획 메시지는 갈아 끼우는 게 아니라 쌓이고, 패널은 늘 마지막 것을 그린다.
+        assertEquals(2, vm.uiState.value.messages.count { it.kind == MessageKind.PLAN })
+        // 이름은 처음 한 번만 붙는다 — 계획을 고쳐도 바뀌지 않는다.
+        assertEquals("원주 한우 후기", vm.uiState.value.session!!.title)
+    }
+
+    /** 버튼을 누르면 초안 턴이 돌고 패널이 에디터로 넘어간다. 그때 계획도 함께 실려 나간다. */
+    @Test
+    fun theDraftButtonRunsADraftTurnAndHandsThePanelToTheEditor() = runTest {
+        turns += TurnResult.Success(TurnResponse("계획이에요", plan = PLAN, readyToDraft = true), emptyList(), "flash")
+        turns += TurnResult.Success(TurnResponse("초안이에요", post = post("제목")), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.send("원주 한우 다녀왔어요"); advanceUntilIdle()
+
+        vm.requestDraft(); advanceUntilIdle()
+
+        assertTrue(contexts.last().draftTurn)
+        assertEquals(PLAN, contexts.last().currentPlan)
+        assertNotNull(vm.uiState.value.panelJobId)
+        assertTrue(vm.uiState.value.panelOpen)
+        // 계획은 기록에 남지만, 초안이 생긴 뒤 오른쪽 자리는 에디터가 가져간다.
+        assertEquals(PLAN, vm.uiState.value.plan)
+    }
+
+    /** 계획 단계에서 모델이 성급하게 post 를 내면 버린다 — 초안은 입력창 위 고정 버튼으로만 시작한다. */
+    @Test
+    fun earlyPostOnPlanningTurnIsIgnoredAndTheDraftButtonTakesOver() = runTest {
+        turns += TurnResult.Success(TurnResponse("계획을 고쳤어요", plan = PLAN, quickReplies = listOf("다른 제목"), post = post("성급한 초안")), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.send("더 짧게"); advanceUntilIdle()
 
         assertFalse(contexts.single().draftTurn)
         assertNull(vm.uiState.value.panelJobId)
-        assertFalse(vm.uiState.value.panelOpen)
         assertTrue(pendingJobs.jobs.value.isEmpty())
         assertTrue(vm.uiState.value.messages.none { it.kind == MessageKind.POST })
-        assertEquals(listOf("다른 제목", ChatViewModel.DRAFT_CHIP), vm.uiState.value.quickReplies)
+        // 칩은 모델이 준 것 그대로 — 초안 칩을 끼워 넣지 않는다.
+        assertEquals(listOf("다른 제목"), vm.uiState.value.quickReplies)
+        // 초안 버튼이 보일 조건: 계획이 있고 아직 초안이 없다.
+        assertNotNull(vm.uiState.value.plan)
+        assertNull(vm.uiState.value.panelJobId)
     }
 
-    /** 초안이 생긴 뒤에는 "이대로 초안 써 줘" 칩을 더 붙이지 않고, 같은 내용이면 에디터를 다시 채우지 않는다. */
+    /** 초안이 생긴 뒤에도 칩은 모델이 준 그대로이고, 같은 내용이면 에디터를 다시 채우지 않는다. */
     @Test
-    fun draftChipDisappearsAfterDraftAndIdenticalPostDoesNotReinject() = runTest {
-        turns += TurnResult.Success(TurnResponse("초안이에요", readyToDraft = true, quickReplies = listOf(ChatViewModel.DRAFT_CHIP, "더 짧게"), post = post("제목")), emptyList(), "flash")
+    fun quickRepliesArePassedThroughAndIdenticalPostDoesNotReinject() = runTest {
+        turns += TurnResult.Success(TurnResponse("초안이에요", readyToDraft = true, quickReplies = listOf("더 짧게"), post = post("제목")), emptyList(), "flash")
         turns += TurnResult.Success(TurnResponse("같은 초안이에요", readyToDraft = true, post = post("제목")), emptyList(), "flash")
         val vm = newViewModel(); vm.open(null); advanceUntilIdle()
         val reinjects = mutableListOf<PostContent>()
