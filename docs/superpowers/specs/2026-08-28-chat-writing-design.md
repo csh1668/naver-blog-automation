@@ -85,7 +85,8 @@ onResult(key, model, outcome):
   5xx/네트워크 → 1회 재시도 후 다음 키
   성공 → 해당 키를 다음 시작점으로
 ```
-- 모델 목록(설정 가능, 기본값은 구현 시 확정): 예 `[gemini-<latest>-flash, gemini-<latest>-flash-lite]`. 원복은 자동(모델 쿨다운 만료 시 primary부터 다시 시도).
+- 모델 목록(설정 가능). 2026-08-28 공식 문서 기준 기본값: primary `gemini-3.7-flash`, fallback `gemini-3.5-flash-lite` (모델 페이지: ai.google.dev/gemini-api/docs/models). 원복은 자동(모델 쿨다운 만료 시 primary부터 다시 시도).
+- **주의 (공식 문서)**: "Rate limits are applied per project, not per API key." — 같은 Google Cloud/AI Studio 프로젝트에서 만든 키 여러 개는 한도를 공유하므로 로테이션 효과가 없다. 관리자 화면의 키 등록 안내에 "키마다 다른 프로젝트에서 발급"을 명시하고, 검증 시 키의 프로젝트를 구분할 수 없으므로 429가 동시에 나면 "같은 프로젝트 키일 수 있어요"라고 알려 준다. 무료 티어 수치는 AI Studio의 Rate Limit 페이지에서 확인(문서에 표 없음).
 
 ### 4.4 게이팅 (FR-2 보완)
 - `ApiKeyStore.hasUsableKey: Flow<Boolean>` (등록·비활성 아님·검증 성공 이력). false면 Home CTA 비활성 + InlineBanner "글을 쓰려면 관리자가 열쇠를 등록해야 해요" (기술 용어 회피). 채팅 화면에 직접 진입 시(초안 재개 등)도 같은 배너.
@@ -192,7 +193,7 @@ onResult(key, model, outcome):
 | 메모리 승인 방식 | LLM이 `remember` 호출 → 사용자가 칩으로 승인 | 자동 저장 후 관리 화면에서 삭제 |
 | 프롬프트 파일 위치 | `assets/prompts/*.md` (관리자 화면에서 수정 불가, 배포로만 변경) | 관리자 화면에서 편집 가능 |
 | 글 길이 기본 | 900~1,400자 | 사용자 지정 |
-| 모델 ID | 구현 시 공식 목록에서 최신 Flash/Flash-Lite 선택, 설정에서 변경 가능 | 고정 |
+| 모델 ID | `gemini-3.7-flash` / `gemini-3.5-flash-lite` (2026-08-28 문서 기준), 설정에서 변경 가능 | 고정 |
 | 사진 프롬프트 해상도 | 긴 변 1024px | 768px(토큰 절약) |
 
 ## 13. SP1과의 접점
