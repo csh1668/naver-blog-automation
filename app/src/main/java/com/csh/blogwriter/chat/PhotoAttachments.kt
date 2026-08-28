@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -35,35 +36,40 @@ class CachedPhotoAttachments @Inject constructor(
 
     companion object { const val LONG_EDGE = 1024; const val QUALITY = 80 }
 
-    /** "{sessionId}/{ref}" → base64. 한 세션 안에서 매 턴 다시 인코딩하지 않으려고 둔다. */
-    private val base64Cache = mutableMapOf<String, String>()
+    /**
+     * 캐시 키는 ref 가 아니라 **원본 uri** 다. 사진을 빼면 남은 사진의 ref 를 다시 매기는데,
+     * ref 로 캐시를 잡으면 그때 다른 사진의 데이터를 돌려주게 된다.
+     * 여러 코루틴(턴 실행 · 첨부)이 동시에 건드리므로 동시성 맵을 쓴다.
+     */
+    private val base64Cache = ConcurrentHashMap<String, String>()
 
+    private fun key(sessionId: String, uri: String) = "$sessionId|$uri"
     private fun dir(sessionId: String) = File(context.cacheDir, "chat/$sessionId").apply { mkdirs() }
-    private fun file(sessionId: String, ref: String) = File(dir(sessionId), "$ref.jpg")
+    private fun file(sessionId: String, uri: String) =
+        File(dir(sessionId), uri.hashCode().toUInt().toString(16) + ".jpg")
 
     override suspend fun prepare(sessionId: String, startIndex: Int, uris: List<String>): List<AttachedPhoto> =
         withContext(Dispatchers.IO) {
             uris.mapIndexed { index, uri ->
-                val ref = "img_%03d".format(startIndex + index + 1)
-                val out = file(sessionId, ref)
-                encode(uri, out)?.let { base64Cache["$sessionId/$ref"] = it }
-                AttachedPhoto(ref, uri, out.takeIf { it.exists() }?.absolutePath)
+                val out = file(sessionId, uri)
+                val encoded = encode(uri, out)
+                encoded?.let { base64Cache[key(sessionId, uri)] = it }
+                AttachedPhoto("img_%03d".format(startIndex + index + 1), uri, if (encoded != null) out.absolutePath else null)
             }
         }
 
     override suspend fun attachments(sessionId: String, photos: List<AttachedPhoto>): List<Attachment> =
         withContext(Dispatchers.IO) {
             photos.mapNotNull { photo ->
-                val key = "$sessionId/${photo.ref}"
-                val cached = base64Cache[key]
-                    ?: file(sessionId, photo.ref).takeIf { it.exists() }?.let { Base64.getEncoder().encodeToString(it.readBytes()) }
-                    ?: encode(photo.uri, file(sessionId, photo.ref))
-                cached?.also { base64Cache[key] = it }?.let { Attachment(photo.ref, it) }
+                val cached = base64Cache[key(sessionId, photo.uri)]
+                    ?: file(sessionId, photo.uri).takeIf { it.exists() }?.let { Base64.getEncoder().encodeToString(it.readBytes()) }
+                    ?: encode(photo.uri, file(sessionId, photo.uri))
+                cached?.also { base64Cache[key(sessionId, photo.uri)] = it }?.let { Attachment(photo.ref, it) }
             }
         }
 
     override fun clear(sessionId: String) {
-        base64Cache.keys.filter { it.startsWith("$sessionId/") }.forEach(base64Cache::remove)
+        base64Cache.keys.removeAll { it.startsWith("$sessionId|") }
         dir(sessionId).deleteRecursively()
     }
 

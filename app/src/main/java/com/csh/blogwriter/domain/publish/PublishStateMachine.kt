@@ -8,7 +8,8 @@ import com.csh.blogwriter.publish.PublishUrlParser
  */
 class PublishStateMachine(
     private val totalImages: Int,
-    private val expectedComponents: Int,
+    /** 재주입으로 글이 바뀌면 기대 컴포넌트 수도 바뀐다 — 기계를 새로 만들면 [sawWritePage] 를 잃으므로 여기만 갈아 끼운다. */
+    var expectedComponents: Int,
     private val blogId: String,
 ) {
 

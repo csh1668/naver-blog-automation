@@ -57,6 +57,8 @@ fun Composer(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val speech = remember { SpeechInput(context) }
+    // 인식 엔진 조회는 패키지 매니저를 타므로 리컴포지션마다 하지 않는다.
+    val speechAvailable = remember { speech.available }
     var listening by remember { mutableStateOf(false) }
     var listenJob by remember { mutableStateOf<Job?>(null) }
     DisposableEffect(Unit) { onDispose { listenJob?.cancel() } }
@@ -111,7 +113,7 @@ fun Composer(
         )
         Spacer(Modifier.width(AppSpacing.sm))
         // 인식 엔진이 없는 기기(에뮬레이터 등)에서는 아예 보여 주지 않는다.
-        if (speech.available) {
+        if (speechAvailable) {
             IconButton(
                 onClick = {
                     if (listening) listenJob?.cancel() else micPermission.launch(Manifest.permission.RECORD_AUDIO)

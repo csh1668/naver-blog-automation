@@ -3,10 +3,11 @@ package com.csh.blogwriter.ui.chat.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,7 +22,10 @@ import coil3.compose.AsyncImage
 import com.csh.blogwriter.ui.theme.AppSpacing
 import com.csh.blogwriter.ui.theme.AppTheme
 
-/** 말풍선. 사용자는 오른쪽 브랜드색, 어시스턴트는 왼쪽 연회색. 최대 폭은 채팅 영역의 80%. */
+/** 말풍선 최대 폭 = 채팅 영역의 80%. 짧은 말은 짧은 풍선이 된다. */
+private const val MAX_BUBBLE_FRACTION = 0.8f
+
+/** 말풍선. 사용자는 오른쪽 브랜드색, 어시스턴트는 왼쪽 연회색. */
 @Composable
 fun MessageBubble(text: String, mine: Boolean) {
     val c = AppTheme.colors
@@ -30,12 +34,11 @@ fun MessageBubble(text: String, mine: Boolean) {
     } else {
         RoundedCornerShape(20.dp, 20.dp, 20.dp, 6.dp)
     }
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = AppSpacing.xs),
-        horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
-    ) {
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = AppSpacing.xs)) {
         Box(
-            Modifier.fillMaxWidth(0.8f).clip(shape)
+            Modifier.align(if (mine) Alignment.CenterEnd else Alignment.CenterStart)
+                .widthIn(max = maxWidth * MAX_BUBBLE_FRACTION)
+                .clip(shape)
                 .background(if (mine) c.fillBrand else c.surfaceWeak)
                 .padding(horizontal = AppSpacing.lg, vertical = AppSpacing.md),
         ) {
@@ -47,9 +50,9 @@ fun MessageBubble(text: String, mine: Boolean) {
 /** 첨부한 사진 줄. 기록용이라 지우거나 순서를 바꾸지 않는다. */
 @Composable
 fun PhotosBubble(uris: List<String>) {
-    Row(Modifier.fillMaxWidth().padding(vertical = AppSpacing.xs), horizontalArrangement = Arrangement.End) {
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = AppSpacing.xs)) {
         LazyRow(
-            Modifier.fillMaxWidth(0.8f),
+            Modifier.align(Alignment.CenterEnd).widthIn(max = maxWidth * MAX_BUBBLE_FRACTION),
             horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
         ) {
             items(uris) { uri ->

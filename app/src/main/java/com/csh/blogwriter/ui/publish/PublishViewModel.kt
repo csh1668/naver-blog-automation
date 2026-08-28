@@ -106,10 +106,8 @@ class PublishViewModel @Inject constructor(
             pendingJobs.save(updated)
             val expected = DocumentModelConverter.expectedComponentCount(content)
             expectedComponents = expected
-            // expectedComponents 는 생성자 값이라 기계를 새로 만든다.
-            machine = PublishStateMachine(images.size, expected, blogId ?: "")
-            // 새 기계는 "글쓰기 화면을 봤다"는 기록이 없어 그대로 두면 발행을 감지하지 못한다.
-            if (lastPageUrl.isNotEmpty()) dispatch(PublishEvent.UrlChanged(lastPageUrl))
+            // 같은 기계를 그대로 쓴다 — 새로 만들면 "글쓰기 화면을 봤다"는 기록을 잃어 발행을 감지하지 못한다.
+            machine?.expectedComponents = expected
             dispatch(PublishEvent.Reinject(content))
         }
     }

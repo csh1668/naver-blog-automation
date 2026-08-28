@@ -28,7 +28,12 @@ data class ChatUiState(
     val panelOpen: Boolean = false,
     val listCollapsed: Boolean = false,
     val hasKey: Boolean = true,
-)
+    /** [attachments] 중 여기부터가 "아직 안 보낸" 사진 — 입력창 위 사진판에 보여 주고 보내면 비운다. */
+    val trayFrom: Int = 0,
+) {
+    /** 입력창 위 사진판에 걸어 둘 사진들. */
+    val tray: List<AttachedPhoto> get() = attachments.drop(trayFrom.coerceIn(0, attachments.size))
+}
 
 /** 사진 첨부 메시지의 내용. */
 data class PhotosPayload(val count: Int, val refs: List<String>, val uris: List<String>)

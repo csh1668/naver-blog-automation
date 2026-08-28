@@ -71,6 +71,8 @@ class ChatViewModel @Inject constructor(
     val reinject: SharedFlow<PostContent> = _reinject
 
     private var messagesJob: Job? = null
+    /** 돌고 있는 턴. 대화를 바꾸면 취소한다 — 늦게 온 답이 엉뚱한 대화에 붙지 않도록. */
+    private var turnJob: Job? = null
     private var readyToDraft = false
     private var lastDraftTurn = false
 
@@ -83,12 +85,20 @@ class ChatViewModel @Inject constructor(
     /** [sessionId] 가 null 이면 새 대화를 시작한다 ("새 글 쓰기"). */
     fun open(sessionId: String?) {
         if (sessionId != null && _uiState.value.session?.id == sessionId) return
+        // 이전 대화의 턴은 여기서 끝낸다. 취소된 턴은 아무것도 저장하지 않는다.
+        turnJob?.cancel()
+        turnJob = null
+        readyToDraft = false
+        lastDraftTurn = false
         viewModelScope.launch {
             val session = sessionId?.let { chatRepo.getSession(it) } ?: chatRepo.createSession()
             val photos = restoreAttachments(session.id)
+            // 새 상태로 통째로 갈아 끼운다 — thinking·streamingSay·toolStatus·칩이 함께 초기화된다.
             _uiState.value = ChatUiState(
                 session = session,
                 attachments = photos,
+                // 이전에 붙였던 사진은 이미 대화에 반영돼 있으므로 사진판은 비운 채로 연다.
+                trayFrom = photos.size,
                 panelJobId = session.pendingJobId,
                 hasKey = _uiState.value.hasKey,
             )
@@ -117,22 +127,45 @@ class ChatViewModel @Inject constructor(
         if (uris.isEmpty()) return
         val session = _uiState.value.session ?: return
         viewModelScope.launch {
-            val added = photoAttachments.prepare(session.id, _uiState.value.attachments.size, uris)
-            val unreadable = added.count { it.thumb == null }
+            val prepared = photoAttachments.prepare(session.id, _uiState.value.attachments.size, uris)
+            // 읽지 못한 사진을 들고 있으면 나중에 발행 단계에서 통째로 실패한다 — 여기서 뺀다.
+            val (usable, unreadable) = prepared.partition { it.thumb != null }
             _uiState.update {
                 it.copy(
-                    attachments = it.attachments + added,
-                    error = if (unreadable > 0) "사진 ${unreadable}장은 읽지 못했어요. 다시 골라 주세요." else null,
+                    attachments = it.attachments + usable,
+                    error = if (unreadable.isNotEmpty()) "사진 ${unreadable.size}장은 읽지 못했어요. 다시 골라 주세요." else null,
                 )
             }
-            chatRepo.appendMessage(session.id, MessageRole.USER, MessageKind.PHOTOS, ChatPayloads.photos(added))
+            if (usable.isNotEmpty()) {
+                chatRepo.appendMessage(session.id, MessageRole.USER, MessageKind.PHOTOS, ChatPayloads.photos(usable))
+            }
         }
     }
 
-    /** 기록에 남은 사진 메시지는 그대로 두고 이번 글에 쓸 목록에서만 뺀다 (ref 는 다시 매기지 않는다). */
+    /**
+     * 기록에 남은 사진 메시지는 그대로 두고 이번 글에 쓸 목록에서만 뺀다.
+     * 남은 사진의 ref 는 `img_001` 부터 다시 매긴다 — 발행 파이프라인이 `imageUris` 순서로 ref 를 붙이므로
+     * 빈 번호가 생기면 초안의 사진 자리를 찾지 못한다. (캐시는 uri 로 잡혀 있어 번호가 바뀌어도 안전하다.)
+     */
     fun removePhoto(ref: String) {
-        _uiState.update { it.copy(attachments = it.attachments.filterNot { photo -> photo.ref == ref }) }
+        _uiState.update { state ->
+            val kept = state.attachments.filterNot { it.ref == ref }
+            state.copy(attachments = renumber(kept), trayFrom = state.trayFrom.coerceAtMost(kept.size))
+        }
     }
+
+    /** 사진판의 앞/뒤 버튼. 순서가 곧 글에 들어갈 순서라 ref 도 함께 다시 매긴다. */
+    fun movePhoto(from: Int, to: Int) {
+        _uiState.update { state ->
+            if (from !in state.attachments.indices || to !in state.attachments.indices) return@update state
+            val list = state.attachments.toMutableList()
+            list.add(to, list.removeAt(from))
+            state.copy(attachments = renumber(list))
+        }
+    }
+
+    private fun renumber(photos: List<AttachedPhoto>) =
+        photos.mapIndexed { index, photo -> photo.copy(ref = "img_%03d".format(index + 1)) }
 
     fun togglePanel() {
         val open = !_uiState.value.panelOpen
@@ -151,6 +184,7 @@ class ChatViewModel @Inject constructor(
             chatRepo.updateSession(updated)
             chatRepo.appendMessage(session.id, MessageRole.SYSTEM, MessageKind.SYSTEM, ChatPayloads.text("발행했어요 🎉 $url"))
             _uiState.update { it.copy(session = updated, panelOpen = false, panelJobId = null) }
+            photoAttachments.clear(session.id)
             publishedHook.onPublished(session.id, url)
         }
     }
@@ -161,30 +195,49 @@ class ChatViewModel @Inject constructor(
         val session = _uiState.value.session ?: return
         if (_uiState.value.thinking) return
         lastDraftTurn = draftTurn
-        viewModelScope.launch {
-            if (!keyStore.hasUsableKey.first()) {
-                system(session.id, NO_KEY)
-                return@launch
-            }
-            if (userText != null) {
-                chatRepo.appendMessage(session.id, MessageRole.USER, MessageKind.TEXT, ChatPayloads.text(userText))
-            }
-            _uiState.update { it.copy(thinking = true, streamingSay = null, toolStatus = null, quickReplies = emptyList(), error = null) }
-            val result = try {
-                runner.runTurn(context(session, draftTurn), listener)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                // 어떤 이유로든 턴이 터져도 "생각 중" 에 갇히지 않게 실패로 바꿔서 이어 간다.
-                TurnResult.Failure(TurnResult.Reason.OTHER, detail = e.message.orEmpty())
-            }
-            _uiState.update { it.copy(thinking = false, streamingSay = null, toolStatus = null) }
-            when (result) {
-                is TurnResult.Success -> onSuccess(result.response)
-                is TurnResult.Failure -> onFailure(session.id, result)
+        // 연타로 두 턴이 겹치지 않게 코루틴을 띄우기 전에 잠근다.
+        _uiState.update {
+            it.copy(
+                thinking = true, streamingSay = null, toolStatus = null, quickReplies = emptyList(), error = null,
+                // 붙인 사진은 이 턴에 함께 나가므로 사진판을 비운다 (대화의 사진 목록에는 그대로 남는다).
+                trayFrom = it.attachments.size,
+            )
+        }
+        val sessionId = session.id
+        turnJob = viewModelScope.launch {
+            try {
+                if (!keyStore.hasUsableKey.first()) {
+                    system(sessionId, NO_KEY)
+                    return@launch
+                }
+                if (userText != null) {
+                    chatRepo.appendMessage(sessionId, MessageRole.USER, MessageKind.TEXT, ChatPayloads.text(userText))
+                }
+                val result = try {
+                    runner.runTurn(context(session, draftTurn), listener)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // 어떤 이유로든 턴이 터져도 "생각 중" 에 갇히지 않게 실패로 바꿔서 이어 간다.
+                    TurnResult.Failure(TurnResult.Reason.OTHER, detail = e.message.orEmpty())
+                }
+                // 답을 기다리는 사이 다른 대화로 옮겨 갔다면 이 답은 조용히 버린다 (아무 데도 저장하지 않는다).
+                if (!isCurrent(sessionId)) return@launch
+                when (result) {
+                    is TurnResult.Success -> onSuccess(sessionId, result.response)
+                    is TurnResult.Failure -> {
+                        _uiState.update { it.copy(streamingSay = null) }
+                        onFailure(sessionId, result)
+                    }
+                }
+            } finally {
+                if (isCurrent(sessionId)) _uiState.update { it.copy(thinking = false, streamingSay = null, toolStatus = null) }
             }
         }
     }
+
+    /** 지금 화면에 떠 있는 대화가 [sessionId] 인가. 늦게 온 결과를 버릴 때 쓴다. */
+    private fun isCurrent(sessionId: String) = _uiState.value.session?.id == sessionId
 
     private val listener = object : TurnListener {
         override fun onToolStatus(text: String) = _uiState.update { it.copy(toolStatus = text) }
@@ -208,23 +261,26 @@ class ChatViewModel @Inject constructor(
         )
     }
 
-    private suspend fun onSuccess(response: TurnResponse) {
-        val session = _uiState.value.session ?: return
+    private suspend fun onSuccess(sessionId: String, response: TurnResponse) {
+        val session = sessionOf(sessionId) ?: return
         readyToDraft = response.readyToDraft
-        chatRepo.appendMessage(session.id, MessageRole.ASSISTANT, MessageKind.TEXT, ChatPayloads.text(response.say))
-        response.plan?.let { chatRepo.appendMessage(session.id, MessageRole.ASSISTANT, MessageKind.PLAN, ChatPayloads.plan(it)) }
-        response.post?.let { chatRepo.appendMessage(session.id, MessageRole.ASSISTANT, MessageKind.POST, ChatPayloads.post(it)) }
+        chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.TEXT, ChatPayloads.text(response.say))
+        // 실제 말풍선이 생긴 뒤에 임시 말풍선을 지운다 — 중간에 빈 화면이 보이지 않게.
+        _uiState.update { it.copy(streamingSay = null) }
+        response.plan?.let { chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.PLAN, ChatPayloads.plan(it)) }
+        response.post?.let { chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.POST, ChatPayloads.post(it)) }
         val chips = if (response.readyToDraft) (response.quickReplies + DRAFT_CHIP).distinct() else response.quickReplies
         _uiState.update { it.copy(quickReplies = chips) }
         val title = response.post?.title ?: session.title ?: response.plan?.titleCandidates?.firstOrNull()
         if (title != session.title) updateSession(session.copy(title = title))
-        response.post?.let { onPostRevised(it) }
+        response.post?.let { onPostRevised(sessionId, it) }
     }
 
     /** 엔진이 post 를 낸 턴의 공통 처리: 발행 작업을 만들거나 갱신하고 패널을 연다. */
-    suspend fun onPostRevised(post: PostContent) {
-        val session = _uiState.value.session ?: return
+    suspend fun onPostRevised(sessionId: String, post: PostContent) {
+        val session = sessionOf(sessionId) ?: return
         val jobId = session.pendingJobId ?: UUID.randomUUID().toString()
+        val alreadyOpened = _uiState.value.panelJobId == jobId
         val existing = pendingJobs.get(jobId)
         pendingJobs.save(
             PendingJob(
@@ -237,10 +293,13 @@ class ChatViewModel @Inject constructor(
                 lastFailure = null,
             )
         )
-        if (session.pendingJobId != jobId || session.status == SessionStatus.DRAFTING) {
-            updateSession(_uiState.value.session!!.copy(pendingJobId = jobId, status = SessionStatus.PUBLISHING))
+        val latest = sessionOf(sessionId) ?: return
+        if (latest.pendingJobId != jobId || latest.status == SessionStatus.DRAFTING) {
+            updateSession(latest.copy(pendingJobId = jobId, status = SessionStatus.PUBLISHING))
         }
-        if (_uiState.value.panelOpen) _reinject.tryEmit(post)
+        // 이 작업의 패널이 이미 붙어 있으면(접혀 있어도 살아 있다) 에디터에 새 내용을 다시 넣어 달라고 한다.
+        // 아직 안 붙었으면 아무도 안 듣고 흘려보내지고, 패널이 처음 뜰 때 방금 저장한 내용으로 시작한다.
+        if (alreadyOpened) _reinject.tryEmit(post)
         _uiState.update { it.copy(panelJobId = jobId, panelOpen = true, listCollapsed = true) }
     }
 
@@ -272,6 +331,9 @@ class ChatViewModel @Inject constructor(
         chatRepo.updateSession(session)
         _uiState.update { it.copy(session = session) }
     }
+
+    /** 화면에 떠 있는 대화가 [sessionId] 일 때만 그 세션을 돌려준다. 늦게 온 턴이 남의 대화를 건드리지 못하게. */
+    private fun sessionOf(sessionId: String): ChatSession? = _uiState.value.session?.takeIf { it.id == sessionId }
 
     private fun lastPost(history: List<ChatMessage>): PostContent? =
         history.lastOrNull { it.kind == MessageKind.POST }?.let { ChatPayloads.readPost(it.payloadJson) }
