@@ -222,3 +222,4 @@ onResult(key, model, outcome):
 - **`PHOTOS` payload 모양**: §5는 `[{uri, ref, width, height, takenAt}]` 배열로 적었지만, 구현(`ChatPayloads.photos`)은 객체 하나 `{count, refs, uris}`다(가로·세로·촬영 시각은 채팅에서 쓰지 않는다).
 - **대화를 다시 열 때 사진 복원의 한계**: `ChatViewModel.restoreAttachments`는 `PHOTOS` 메시지를 모아 uri로 중복을 걸러 내고 ref를 다시 매긴다. 남는 문제 — 뺐던 사진은 메시지 기록에 그대로 남아 있어 대화를 다시 열면 목록에 되살아난다(SP3에서 제거 이벤트를 기록해 해결).
 - **발행 버튼은 앱이 절대 누르지 않는다**: §6/§13대로 구현되어 있으며, `ChatViewModel`에도 "발행 버튼은 사용자가 직접 누른다"는 주석으로 명시. 앱은 초안을 에디터에 채워 넣는 데까지만 관여한다.
+- **PIN 게이트 제거(사용자 결정 2026-08-29)**: §4.4·§9에서 서술한 관리자 PIN 설정/검증 흐름을 제거했다. 홈 화면 톱니 아이콘(`onAdmin`)이 `Routes.Admin`으로 바로 `SettingsScreen`을 띄우며, `PinGateScreen`/`PinViewModel`/`PinManager`와 `SettingsStore.pinHash`도 함께 삭제했다.

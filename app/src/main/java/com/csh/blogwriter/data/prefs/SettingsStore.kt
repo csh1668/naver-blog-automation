@@ -26,9 +26,6 @@ interface SettingsStore {
     suspend fun setDismissedUpdateTag(tag: String?) {}
     suspend fun dismissedUpdateTagOnce(): String? = dismissedUpdateTag.first()
 
-    val pinHash: Flow<String?> get() = flowOf(null)
-    suspend fun setPinHash(hash: String?) {}
-
     val modelPolicy: Flow<ModelPolicy> get() = flowOf(ModelPolicy.DEFAULT)
     suspend fun setModelPolicy(policy: ModelPolicy) {}
     suspend fun modelPolicyOnce(): ModelPolicy = modelPolicy.first()
@@ -41,7 +38,6 @@ class DataStoreSettingsStore @Inject constructor(private val dataStore: DataStor
     private val keyBlogId = stringPreferencesKey("blog_id")
     private val keyLastUpdateCheckAt = longPreferencesKey("last_update_check_at")
     private val keyDismissedUpdateTag = stringPreferencesKey("dismissed_update_tag")
-    private val keyPinHash = stringPreferencesKey("pin_hash")
     private val keyModelList = stringPreferencesKey("model_list")
     private val keyModelTemperature = stringPreferencesKey("model_temperature")
     private val keyTargetLength = stringPreferencesKey("target_length")
@@ -60,11 +56,6 @@ class DataStoreSettingsStore @Inject constructor(private val dataStore: DataStor
     override val dismissedUpdateTag: Flow<String?> = dataStore.data.map { it[keyDismissedUpdateTag] }
     override suspend fun setDismissedUpdateTag(tag: String?) {
         dataStore.edit { prefs -> if (tag == null) prefs.remove(keyDismissedUpdateTag) else prefs[keyDismissedUpdateTag] = tag }
-    }
-
-    override val pinHash: Flow<String?> = dataStore.data.map { it[keyPinHash] }
-    override suspend fun setPinHash(hash: String?) {
-        dataStore.edit { prefs -> if (hash == null) prefs.remove(keyPinHash) else prefs[keyPinHash] = hash }
     }
 
     override val modelPolicy: Flow<ModelPolicy> = dataStore.data.map { prefs ->

@@ -65,7 +65,6 @@ fun SettingsScreen(
     onPrompts: () -> Unit,
     onMemory: () -> Unit,
     onFailureLogs: () -> Unit,
-    onChangePin: () -> Unit,
     onLoggedOut: () -> Unit,
     onBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
@@ -86,8 +85,6 @@ fun SettingsScreen(
         ResearchToggleRow(checked = state.researchEnabled, onCheckedChange = viewModel::setResearchEnabled)
         Spacer(Modifier.height(AppSpacing.md))
         ListRow(title = "실패 로그", onClick = onFailureLogs)
-        Spacer(Modifier.height(AppSpacing.md))
-        ListRow(title = "PIN 변경", onClick = onChangePin)
         Spacer(Modifier.height(AppSpacing.md))
         ListRow(title = "네이버 로그아웃", onClick = { logoutConfirm = true }, trailingChevron = false)
     }
