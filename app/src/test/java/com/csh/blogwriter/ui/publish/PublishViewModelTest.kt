@@ -139,4 +139,36 @@ class PublishViewModelTest {
         assertEquals("LOAD_EDITOR", failures.single().stage)
         assertEquals("LOAD_EDITOR: " + failed.message, pending.value!!.lastFailure)
     }
+
+    @Test
+    fun uploadTimeoutReArmsAfterEachImage() = runTest {
+        pending.value = PendingJob(
+            "job1",
+            PostContent("제목", listOf(Block.Paragraph(listOf(Run("본문"))), Block.Image("img_001"), Block.Image("img_002"))),
+            listOf("content://a", "content://b"), null, 1L, null,
+        )
+        val vm = vm(); val c = FakeController()
+        vm.navigation.test {
+            vm.attach(c); runCurrent()
+            vm.onPageFinished("https://blog.naver.com/myblog?Redirect=Write&categoryNo=25"); runCurrent()
+            vm.onReady(); runCurrent()
+            vm.onPopupsDismissed(0); runCurrent()
+            assertEquals(PublishState.UploadingImages(0, 2), vm.uiState.value.state)
+            assertTrue(c.calls.contains("upload:img_001,img_002"))
+
+            vm.onImageUploaded("img_001", uploadResponse("img_001")); runCurrent()
+            assertEquals(PublishState.UploadingImages(1, 2), vm.uiState.value.state)
+
+            // 두 번째 사진이 멈추면 다시 건 제한 시간이 동작해야 한다.
+            advanceTimeBy(PublishViewModel.UPLOAD_TIMEOUT_PER_IMAGE_MS + 1_000); runCurrent()
+            assertEquals(PublishNav.Failed("job1"), awaitItem())
+        }
+        val failed = vm.uiState.value.state as PublishState.Failed
+        assertEquals(PublishStage.UPLOAD, failed.stage)
+        assertEquals("UPLOAD", failures.single().stage)
+    }
+
+    private fun uploadResponse(ref: String) = Json.parseToJsonElement(
+        """{"url":"/a/b.PNG/$ref.jpg","fileName":"$ref.jpg","width":800,"height":600,"fileSize":1,"domain":"https://blogfiles.pstatic.net"}"""
+    ).jsonObject
 }

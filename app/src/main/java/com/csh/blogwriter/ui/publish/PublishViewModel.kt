@@ -128,6 +128,11 @@ class PublishViewModel @Inject constructor(
             _uiState.update { it.copy(state = next) }
             timeoutJob?.cancel()
             if (next !is PublishState.LoadingEditor) pollJob?.cancel()
+            // 사진 한 장이 끝나도 남은 장수만큼 제한 시간을 다시 건다.
+            // (첫 건은 UploadImages 효과가 건다 — 그것까지 중복해 걸지 않도록 done > 0 일 때만.)
+            if (next is PublishState.UploadingImages && next.done > 0) {
+                armTimeout(PublishStage.UPLOAD, UPLOAD_TIMEOUT_PER_IMAGE_MS * (next.total - next.done))
+            }
         }
         effects.forEach { runEffect(it) }
     }
