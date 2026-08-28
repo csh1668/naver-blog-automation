@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -25,6 +26,7 @@ import com.csh.blogwriter.ui.components.ScreenScaffold
 import com.csh.blogwriter.ui.components.WeakButton
 import com.csh.blogwriter.ui.theme.AppSpacing
 import com.csh.blogwriter.ui.theme.AppTheme
+import kotlinx.coroutines.launch
 
 private const val NAVER_BLOG_PACKAGE = "com.nhn.android.blog"
 
@@ -34,6 +36,7 @@ fun FallbackScreen(onRetry: () -> Unit, onHome: () -> Unit, viewModel: FallbackV
     val context = LocalContext.current
     val s = state ?: return
     var confirmDiscard by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     ScreenScaffold(
         topBar = { AppTopBar(onBack = onHome) },
         bottom = {
@@ -65,7 +68,7 @@ fun FallbackScreen(onRetry: () -> Unit, onHome: () -> Unit, viewModel: FallbackV
         visible = confirmDiscard,
         title = "이 글을 지울까요?",
         message = "지운 글은 되돌릴 수 없어요. 사진은 갤러리에 그대로 있어요.",
-        confirmText = "지우기", onConfirm = { confirmDiscard = false; viewModel.discard(); onHome() },
+        confirmText = "지우기", onConfirm = { confirmDiscard = false; scope.launch { viewModel.discard(); onHome() } },
         dismissText = "그대로 두기", onDismiss = { confirmDiscard = false },
         danger = true,
     )

@@ -74,18 +74,31 @@ class FallbackViewModelTest {
         assertEquals("네이버 글쓰기 화면이 열리지 않았어요.", s.reason)
     }
 
-    /** "이 글은 그만 쓰기" 확인 시 대기 작업을 지우고 준비해 둔 사진 캐시도 지운다. */
+    /** "이 글은 그만 쓰기" 확인 시 대기 작업을 지우고(먼저) 준비해 둔 사진 캐시도 지운다(그 다음).
+     * discard() 는 suspend 로 두 작업이 순서대로, 완전히 끝난 뒤에 반환되어야 한다(화면 이동 전에 삭제가 끝나도록). */
     @Test
-    fun discardDeletesJobAndClearsPreparedImages() = runTest {
-        val preparer = FakeImagePreparing()
-        val vm = FallbackViewModel(SavedStateHandle(mapOf("jobId" to "j")), repo, preparer)
+    fun discardDeletesJobThenClearsPreparedImages() = runTest {
+        val calls = mutableListOf<String>()
+        val recordingRepo = object : PendingJobRepository {
+            private val flow = MutableStateFlow<PendingJob?>(job)
+            override fun observeLatest(): Flow<PendingJob?> = flow
+            override suspend fun get(id: String) = flow.value
+            override suspend fun save(job: PendingJob) {}
+            override suspend fun setPreparedPaths(id: String, paths: List<String>?) {}
+            override suspend fun setLastFailure(id: String, message: String?) {}
+            override suspend fun delete(id: String) { calls += "delete:$id" }
+        }
+        val recordingPreparer = object : ImagePreparing {
+            override suspend fun prepare(jobId: String, uris: List<String>, onProgress: (Int) -> Unit): List<PreparedImage> = emptyList()
+            override fun load(jobId: String, paths: List<String>): List<PreparedImage>? = null
+            override fun clear(jobId: String) { calls += "clear:$jobId" }
+        }
+        val vm = FallbackViewModel(SavedStateHandle(mapOf("jobId" to "j")), recordingRepo, recordingPreparer)
         advanceUntilIdle()
 
         vm.discard()
-        advanceUntilIdle()
 
-        assertEquals(listOf("j"), deletedIds)
-        assertEquals(listOf("j"), preparer.clearedIds)
+        assertEquals(listOf("delete:j", "clear:j"), calls)
     }
 
     @Test

@@ -33,12 +33,12 @@ class FallbackViewModel @Inject constructor(
     private val _uiState = MutableStateFlow<FallbackUiState?>(null)
     val uiState: StateFlow<FallbackUiState?> = _uiState
 
-    /** 올리다 만 글을 그만 쓴다: 대기 작업과 준비해 둔 사진 캐시를 지운다. 갤러리 원본은 건드리지 않는다. */
-    fun discard() {
-        viewModelScope.launch {
-            pendingJobs.delete(jobId)
-            preparer.clear(jobId)
-        }
+    /** 올리다 만 글을 그만 쓴다: 대기 작업과 준비해 둔 사진 캐시를 지운다. 갤러리 원본은 건드리지 않는다.
+     * suspend 로 두어 호출자(화면)가 완료를 기다린 뒤 화면을 나가게 한다 — fire-and-forget 으로 두면
+     * 화면 이동이 먼저 일어나 ViewModelStore 가 정리되면서 이 작업이 중간에 취소될 수 있다. */
+    suspend fun discard() {
+        pendingJobs.delete(jobId)
+        preparer.clear(jobId)
     }
 
     init {
