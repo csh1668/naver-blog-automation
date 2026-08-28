@@ -7,6 +7,7 @@ import android.graphics.Matrix
 import android.net.Uri
 import androidx.exifinterface.media.ExifInterface
 import com.csh.blogwriter.domain.model.PreparedImage
+import com.csh.blogwriter.ui.publish.ImagePreparing
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -16,12 +17,13 @@ import javax.inject.Inject
 import kotlin.math.max
 
 /** 갤러리 Uri → 업로드용 JPEG (긴 변 1600px, 품질 85, EXIF 회전 적용, ASCII 파일명). */
-class ImagePreparer @Inject constructor(@ApplicationContext private val context: Context) {
+class ImagePreparer @Inject constructor(@ApplicationContext private val context: Context) : ImagePreparing {
 
     companion object { const val LONG_EDGE = 1600; const val QUALITY = 85 }
 
     private fun dir(jobId: String) = File(context.cacheDir, "publish/$jobId").apply { mkdirs() }
 
+    @JvmName("prepareUris")
     suspend fun prepare(jobId: String, uris: List<Uri>, onProgress: (Int) -> Unit): List<PreparedImage> = withContext(Dispatchers.IO) {
         val dir = dir(jobId)
         uris.mapIndexed { index, uri ->
@@ -36,7 +38,10 @@ class ImagePreparer @Inject constructor(@ApplicationContext private val context:
         }
     }
 
-    fun load(jobId: String, paths: List<String>): List<PreparedImage>? {
+    override suspend fun prepare(jobId: String, uris: List<String>, onProgress: (Int) -> Unit): List<PreparedImage> =
+        prepare(jobId, uris.map(Uri::parse), onProgress)
+
+    override fun load(jobId: String, paths: List<String>): List<PreparedImage>? {
         val images = paths.mapIndexed { index, path ->
             val file = File(path)
             if (!file.exists()) return null
@@ -47,7 +52,7 @@ class ImagePreparer @Inject constructor(@ApplicationContext private val context:
         return images
     }
 
-    fun clear(jobId: String) { dir(jobId).deleteRecursively() }
+    override fun clear(jobId: String) { dir(jobId).deleteRecursively() }
 
     private fun decodeScaled(uri: Uri): Bitmap {
         val resolver = context.contentResolver

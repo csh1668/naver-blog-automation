@@ -11,6 +11,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.csh.blogwriter.domain.model.PreparedImage
+import com.csh.blogwriter.ui.publish.EditorController
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -18,7 +19,7 @@ import org.json.JSONObject
  * 스마트에디터 페이지를 띄우고 editor_bridge.js 의 함수를 호출하는 래퍼.
  * 모든 결과는 [Listener] 로 비동기 회신된다. 화면(Compose AndroidView)이 [view] 를 붙인다.
  */
-class NaverEditorWebView(context: Context, private val listener: Listener) {
+class NaverEditorWebView(context: Context, private val listener: Listener) : EditorController {
     interface Listener : EditorBridge.Listener {
         fun onUrlChanged(url: String)
         fun onPageFinished(url: String)
@@ -50,27 +51,27 @@ class NaverEditorWebView(context: Context, private val listener: Listener) {
         }
     }
 
-    fun loadEditor(blogId: String) = view.loadUrl(NaverWebViewConfig.writeUrl(blogId))
+    override fun loadEditor(blogId: String) = view.loadUrl(NaverWebViewConfig.writeUrl(blogId))
 
-    fun setLocalImages(images: List<PreparedImage>) {
+    override fun setLocalImages(images: List<PreparedImage>) {
         interceptor = LocalImageInterceptor(images.associate { it.ref to it.file })
     }
 
     /** 페이지 로드 후 한 번 호출. window.__app 을 정의한다. 이미 있으면 다시 정의하지 않는다. */
-    fun installBridgeScript() {
+    override fun installBridgeScript() {
         val script = bridgeScript ?: view.context.assets.open("editor_bridge.js").bufferedReader().readText().also { bridgeScript = it }
         view.evaluateJavascript("if(!window.__app){$script}", null)
     }
 
-    fun checkReady() = view.evaluateJavascript("window.__app && window.__app.checkReady();", null)
-    fun dismissPopups() = view.evaluateJavascript("window.__app.dismissPopups();", null)
+    override fun checkReady() = view.evaluateJavascript("window.__app && window.__app.checkReady();", null)
+    override fun dismissPopups() = view.evaluateJavascript("window.__app.dismissPopups();", null)
 
-    fun uploadImages(refs: List<String>) {
+    override fun uploadImages(refs: List<String>) {
         val arg = JSONArray(refs.map { JSONObject().put("ref", it).put("url", LocalImageInterceptor.urlFor(it)) })
         view.evaluateJavascript("window.__app.uploadImages($arg);", null)
     }
 
-    fun setDocument(documentJson: String) {
+    override fun setDocument(documentJson: String) {
         // JSON 문자열을 JS 문자열 리터럴로 안전하게 넘긴 뒤 JS 쪽에서 parse 한다.
         val literal = JSONObject.quote(documentJson)
         view.evaluateJavascript("window.__app.setDocument($literal);", null)

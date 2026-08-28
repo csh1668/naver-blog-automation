@@ -11,6 +11,7 @@ import com.csh.blogwriter.ui.compose.TestComposeScreen
 import com.csh.blogwriter.ui.history.HistoryScreen
 import com.csh.blogwriter.ui.home.HomeScreen
 import com.csh.blogwriter.ui.login.LoginScreen
+import com.csh.blogwriter.ui.publish.PublishScreen
 
 @Composable
 fun AppNavHost() {
@@ -44,7 +45,14 @@ fun AppNavHost() {
                 onPublish = { id -> nav.navigate(Routes.Publish(id)) { popUpTo(Routes.Home) } },
             )
         }
-        composable<Routes.Publish> { Text("준비 중: 발행 " + it.toRoute<Routes.Publish>().jobId) }
+        composable<Routes.Publish> {
+            PublishScreen(
+                onDone = { nav.navigate(Routes.Home) { popUpTo(Routes.Home) { inclusive = true } } },
+                onSessionExpired = { id -> nav.navigate(Routes.Login("publish:$id")) { popUpTo(Routes.Home) } },
+                onFailed = { id -> nav.navigate(Routes.Fallback(id)) { popUpTo(Routes.Home) } },
+                onLeave = { nav.navigate(Routes.Home) { popUpTo(Routes.Home) { inclusive = true } } },
+            )
+        }
         composable<Routes.Fallback> { Text("준비 중: 폴백 " + it.toRoute<Routes.Fallback>().jobId) }
         composable<Routes.History> { HistoryScreen(onBack = { nav.popBackStack() }) }
         composable<Routes.FailureLogs> { FailureLogScreen(onBack = { nav.popBackStack() }) }
