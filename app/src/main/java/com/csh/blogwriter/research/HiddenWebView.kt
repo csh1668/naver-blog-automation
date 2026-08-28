@@ -81,10 +81,14 @@ class HiddenWebView(private val context: Context) {
  * http(s) 가 아닌 스킴은 다른 앱을 띄운다.
  */
 internal fun blockedNavigation(url: String): Boolean {
-    val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return true
-    val scheme = uri.scheme?.lowercase()
+    // java.net.URI 는 인코딩 안 된 한글·공백이 섞인 리다이렉트를 예외로 뱉어 정상 검색까지 막아 버린다.
+    // 스킴/호스트만 느슨하게 잘라 본다.
+    val m = NAV_URL.matchEntire(url.trim()) ?: return true
+    val scheme = m.groupValues[1].lowercase()
     if (scheme != "http" && scheme != "https") return true
-    val host = uri.host?.lowercase().orEmpty()
+    val host = m.groupValues[2].lowercase().substringBefore(":")
     if (host == "nid.naver.com" || host.endsWith(".nid.naver.com")) return true
     return url.contains("Redirect=Write")
 }
+
+private val NAV_URL = Regex("""([A-Za-z][A-Za-z0-9+.-]*)://([^/?#\s]+)(.*)""", RegexOption.DOT_MATCHES_ALL)

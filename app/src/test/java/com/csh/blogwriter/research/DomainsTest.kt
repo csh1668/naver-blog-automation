@@ -10,6 +10,9 @@ class BlockedNavigationTest {
     fun allowsOrdinaryHttpPages() {
         assertFalse(blockedNavigation("https://search.naver.com/search.naver?query=a"))
         assertFalse(blockedNavigation("http://example.com/a"))
+        // 인코딩 안 된 한글·공백이 섞인 리다이렉트도 정상 http(s) 면 통과한다.
+        assertFalse(blockedNavigation("https://m.search.naver.com/search.naver?query=원주 한우 맛집&where=m"))
+        assertFalse(blockedNavigation("https://example.com:8443/{a}|b"))
     }
 
     @Test
