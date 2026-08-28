@@ -201,6 +201,22 @@ class PublishViewModelTest {
         assertEquals("UPLOAD", failures.single().stage)
     }
 
+    /** 컴포넌트 수가 기대보다 많으면(에디터가 더 만들어 둔 경우) 실패시키지 않고 검토로 넘어가되 경고를 로그로 남긴다.
+     * android.util.Log 는 계측 없는 단위 테스트에서는 스텁 예외를 던지므로, isReturnDefaultValues 설정이 없으면 이 테스트가 죽는다. */
+    @Test
+    fun onInjectedWithMoreComponentsThanExpectedLogsWarningAndReviews() = runTest {
+        val vm = vm(); val c = FakeController()
+        vm.attach(c); runCurrent()
+        vm.onUrlChanged("https://blog.naver.com/myblog?Redirect=Write"); vm.onPageFinished("https://blog.naver.com/myblog?Redirect=Write&categoryNo=25"); runCurrent()
+        vm.onReady(); runCurrent()
+        vm.onPopupsDismissed(0); runCurrent()
+        vm.onImageUploaded("img_001", uploadResponse("img_001")); runCurrent()
+        assertEquals(PublishState.Injecting, vm.uiState.value.state)
+
+        vm.onInjected(4); runCurrent()
+        assertEquals(PublishState.Reviewing, vm.uiState.value.state)
+    }
+
     private fun uploadResponse(ref: String) = Json.parseToJsonElement(
         """{"url":"/a/b.PNG/$ref.jpg","fileName":"$ref.jpg","width":800,"height":600,"fileSize":1,"domain":"https://blogfiles.pstatic.net"}"""
     ).jsonObject

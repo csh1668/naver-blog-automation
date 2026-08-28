@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -68,7 +69,7 @@ fun PublishPanel(
     val state = ui.state
     Box(modifier) {
         // WebView 는 항상 살아 있어야 하므로 먼저 배치하고, 필요할 때만 오버레이로 가린다.
-        Column(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().statusBarsPadding()) {
             if (state is PublishState.Reviewing) {
                 Box(Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
                     InlineBanner("내용을 확인하고 오른쪽 위 '발행'을 눌러 주세요", BannerKind.Info)
