@@ -44,6 +44,19 @@ class KeyRotatorTest {
     }
 
     @Test
+    fun serverErrorCoolsTheModelForFiveMinutesThenRetriesIt() {
+        val r = rotator()
+        val first = r.next()!!
+        assertEquals("flash", first.model)
+        r.report(first, KeyRotator.Outcome.SERVER_ERROR)
+        assertEquals("lite", r.next()!!.model)
+        now += KeyRotator.SERVER_COOLDOWN_MS - 1
+        assertEquals("lite", r.next()!!.model)
+        now += 2
+        assertEquals("flash", r.next()!!.model)
+    }
+
+    @Test
     fun invalidKeyIsDisabledAndAllExhaustedReturnsNullWithNextTime() {
         val r = rotator(keys = listOf("k1", "k2"), models = listOf("flash"))
         r.report(r.next()!!, KeyRotator.Outcome.INVALID_KEY)

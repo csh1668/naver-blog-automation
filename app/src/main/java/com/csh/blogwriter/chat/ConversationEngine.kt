@@ -82,7 +82,11 @@ class ConversationEngine(
         var lastKind: GeminiException.Kind? = null
         val maxAttempts = ids.size * policy.models.size + 2
         while (attempts++ < maxAttempts) {
-            val picked = rot.next() ?: return TurnResult.Failure(TurnResult.Reason.RATE_LIMITED, rot.nextAvailableAt(), "모든 키가 쉬는 중이에요")
+            val picked = rot.next() ?: return if (lastKind == GeminiException.Kind.SERVER) {
+                TurnResult.Failure(TurnResult.Reason.SERVER, rot.nextAvailableAt(), lastDetail)
+            } else {
+                TurnResult.Failure(TurnResult.Reason.RATE_LIMITED, rot.nextAvailableAt(), "모든 키가 쉬는 중이에요")
+            }
             val model = if (picked.model in deadModels) {
                 policy.models.firstOrNull { it !in deadModels }
                     ?: return TurnResult.Failure(
@@ -120,7 +124,7 @@ class ConversationEngine(
                     // 그래도 안 되면 이 모델을 이번 턴에서 접고 대체 모델로 내려간다(키만 바꿔 가며 같은 모델을 두드리지 않는다).
                     GeminiException.Kind.SERVER ->
                         if (!transientRetried) { transientRetried = true; attempts-- }
-                        else { deadModels += pick.model; rot.report(pick, KeyRotator.Outcome.TRANSIENT) }
+                        else { deadModels += pick.model; rot.report(pick, KeyRotator.Outcome.SERVER_ERROR) }
                 }
             } catch (e: BadResponse) {
                 Log.w(TAG, "attempt $attempts bad response: ${e.message}")

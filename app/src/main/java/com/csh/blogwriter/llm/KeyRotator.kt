@@ -9,11 +9,13 @@ import java.time.ZoneId
  */
 class KeyRotator(keyIds: List<String>, private val models: List<String>, private val clock: () -> Long) {
     data class Pick(val keyId: String, val model: String)
-    enum class Outcome { SUCCESS, RATE_LIMITED, INVALID_KEY, TRANSIENT }
+    enum class Outcome { SUCCESS, RATE_LIMITED, INVALID_KEY, TRANSIENT, SERVER_ERROR }
 
     companion object {
         const val KEY_COOLDOWN_MS = 60_000L
         const val MODEL_COOLDOWN_MS = 600_000L
+        /** 5xx(과부하) 를 낸 모델은 잠시 건너뛴다 — 매 턴 90초씩 기다리지 않도록. */
+        const val SERVER_COOLDOWN_MS = 300_000L
         const val DAILY_CAP = 20
     }
 
@@ -58,6 +60,10 @@ class KeyRotator(keyIds: List<String>, private val models: List<String>, private
             }
             Outcome.INVALID_KEY -> key.disabled = true
             Outcome.TRANSIENT -> startIndex = (keys.indexOf(key) + 1) % keys.size
+            Outcome.SERVER_ERROR -> {
+                modelCooldownUntil[pick.model] = maxOf(modelCooldownUntil[pick.model] ?: 0L, now + SERVER_COOLDOWN_MS)
+                startIndex = (keys.indexOf(key) + 1) % keys.size
+            }
         }
     }
 
