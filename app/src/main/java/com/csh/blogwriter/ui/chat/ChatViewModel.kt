@@ -5,11 +5,13 @@ import androidx.lifecycle.viewModelScope
 import com.csh.blogwriter.chat.AttachedPhoto
 import com.csh.blogwriter.chat.ChatContext
 import com.csh.blogwriter.chat.PhotoAttachments
+import com.csh.blogwriter.chat.PostContentRepair
 import com.csh.blogwriter.chat.PublishedHook
 import com.csh.blogwriter.chat.TurnListener
 import com.csh.blogwriter.chat.TurnResponse
 import com.csh.blogwriter.chat.TurnResult
 import com.csh.blogwriter.chat.TurnRunner
+import com.csh.blogwriter.data.prefs.SettingsStore
 import com.csh.blogwriter.data.repo.ChatMessage
 import com.csh.blogwriter.data.repo.ChatRepository
 import com.csh.blogwriter.data.repo.ChatSession
@@ -20,6 +22,7 @@ import com.csh.blogwriter.data.repo.MessageRole
 import com.csh.blogwriter.data.repo.PendingJob
 import com.csh.blogwriter.data.repo.PendingJobRepository
 import com.csh.blogwriter.data.repo.SessionStatus
+import com.csh.blogwriter.domain.model.Block
 import com.csh.blogwriter.domain.model.PostContent
 import com.csh.blogwriter.llm.ApiKeyStore
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -34,6 +37,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 import kotlin.math.ceil
@@ -51,6 +55,7 @@ class ChatViewModel @Inject constructor(
     private val keyStore: ApiKeyStore,
     private val memory: MemoryRepository,
     private val publishedHook: PublishedHook,
+    private val settings: SettingsStore,
 ) : ViewModel() {
 
     companion object {
@@ -59,6 +64,12 @@ class ChatViewModel @Inject constructor(
         const val DRAFT_CHIP = "이대로 초안 써 줘"
         const val NO_KEY = "글을 쓰려면 관리자가 열쇠를 등록해야 해요"
         const val NO_PHOTO_AFTER_DRAFT = "초안을 만든 뒤에는 사진을 더 붙일 수 없어요. 새 글에서 이어 가 주세요."
+        /** 품질 게이트 카드의 제목과 버튼. */
+        const val GATE_TITLE = "초안을 넣기 전에 확인해 주세요"
+        const val GATE_ACCEPT = "이대로 넣기"
+        const val GATE_FIX = "고쳐 달라고 하기"
+        /** 목표 글자 수에서 이만큼은 봐준다. */
+        private const val LENGTH_TOLERANCE = 0.1
         private val DRAFT_WORDS = Regex("초안|써 줘|작성해")
     }
 
@@ -271,7 +282,9 @@ class ChatViewModel @Inject constructor(
         if (_uiState.value.thinking) return
         lastDraftTurn = draftTurn
         // 연타로 두 턴이 겹치지 않게 코루틴을 띄우기 전에 잠근다.
-        _uiState.update { it.copy(thinking = true, streamingSay = null, toolStatus = null, quickReplies = emptyList(), error = null) }
+        _uiState.update {
+            it.copy(thinking = true, streamingSay = null, toolStatus = null, quickReplies = emptyList(), error = null, draftGate = null)
+        }
         val sessionId = session.id
         turnJob = viewModelScope.launch {
             try {
@@ -295,7 +308,7 @@ class ChatViewModel @Inject constructor(
                 // 답을 기다리는 사이 다른 대화로 옮겨 갔다면 이 답은 조용히 버린다 (아무 데도 저장하지 않는다).
                 if (!isCurrent(sessionId)) return@launch
                 when (result) {
-                    is TurnResult.Success -> onSuccess(sessionId, result.response)
+                    is TurnResult.Success -> onSuccess(sessionId, result.response, result.repairs)
                     is TurnResult.Failure -> {
                         _uiState.update { it.copy(streamingSay = null) }
                         onFailure(sessionId, result)
@@ -332,17 +345,22 @@ class ChatViewModel @Inject constructor(
             currentPlan = if (_uiState.value.panelJobId == null) lastPlan(history) else null,
             // 재주입 조건과 같아야 한다 — 패널을 접어 두고 "문단 2를 더 짧게" 라고 해도 지금 초안을 함께 보낸다.
             currentPost = if (_uiState.value.panelJobId != null) lastPost(history) else null,
+            questionRounds = questionRounds(history),
         )
     }
 
-    private suspend fun onSuccess(sessionId: String, response: TurnResponse) {
+    private suspend fun onSuccess(sessionId: String, response: TurnResponse, repairs: List<String>) {
         val session = sessionOf(sessionId) ?: return
         // post 는 사용자가 초안을 요청한 턴, 또는 이미 초안이 있어 고치는 턴에서만 받는다.
         // 모델이 계획 단계에서 성급하게 post 를 내면 버린다 — 초안은 입력창 위 버튼으로만 시작한다.
         val hasDraft = session.pendingJobId != null
         val post = response.post?.takeIf { lastDraftTurn || hasDraft }
-        readyToDraft = response.readyToDraft || (response.post != null && post == null)
-        chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.TEXT, ChatPayloads.text(response.say))
+        // 되묻기만 한 턴에서는 아직 쓸 준비가 안 된 것이다 — 모델이 true 를 보내도 막는다.
+        val questionTurn = response.plan == null && response.question != null
+        readyToDraft = !questionTurn && (response.readyToDraft || (response.post != null && post == null))
+        // 질문은 말풍선 하나 안에서 say 다음 줄에 붙인다.
+        val say = if (response.question.isNullOrBlank()) response.say else response.say + "\n" + response.question
+        chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.TEXT, ChatPayloads.text(say))
         // 실제 말풍선이 생긴 뒤에 임시 말풍선을 지운다 — 중간에 빈 화면이 보이지 않게.
         _uiState.update { it.copy(streamingSay = null) }
         response.plan?.let {
@@ -350,12 +368,78 @@ class ChatViewModel @Inject constructor(
             // 계획이 나오면 오른쪽에 바로 펼쳐 준다 (초안이 이미 있으면 그 자리는 에디터가 지킨다).
             _uiState.update { state -> state.copy(panelOpen = true, listCollapsed = true) }
         }
-        post?.let { chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.POST, ChatPayloads.post(it)) }
         _uiState.update { it.copy(quickReplies = response.quickReplies) }
         // 제목은 한 번만 자동으로 붙는다 — session.title 이 이미 있으면(자동이든 사용자가 바꿨든) 건드리지 않는다.
         val title = session.title ?: response.plan?.let(::planTitle) ?: post?.title
         if (title != session.title) updateSession(session.copy(title = title))
-        post?.let { onPostRevised(sessionId, it) }
+        if (post == null) return
+        // 에디터에 넣기 전 마지막 점검 — 걸리면 사용자가 넣을지 고쳐 달라고 할지 고른다.
+        val gate = draftGate(post, repairs)
+        if (gate == null) acceptDraft(sessionId, post)
+        else _uiState.update { it.copy(draftGate = gate) }
+    }
+
+    /** 점검을 통과했거나 사용자가 "이대로 넣기"를 고른 초안. */
+    private suspend fun acceptDraft(sessionId: String, post: PostContent) {
+        chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.POST, ChatPayloads.post(post))
+        onPostRevised(sessionId, post)
+    }
+
+    fun acceptDraftGate() {
+        val gate = _uiState.value.draftGate ?: return
+        val sessionId = _uiState.value.session?.id ?: return
+        _uiState.update { it.copy(draftGate = null) }
+        viewModelScope.launch { if (isCurrent(sessionId)) acceptDraft(sessionId, gate.post) }
+    }
+
+    /** 고쳐 달라는 말을 사용자 메시지로 대신 보낸다. 초안이 이미 있으면 수정 턴, 없으면 초안 턴이다. */
+    fun fixDraftGate() {
+        val gate = _uiState.value.draftGate ?: return
+        _uiState.update { it.copy(draftGate = null) }
+        runTurn(gate.request, draftTurn = _uiState.value.panelJobId == null)
+    }
+
+    /**
+     * 모델을 부르지 않는 로컬 점검 — 본문 글자 수(허용 오차 ±10%)와 엔진이 손댄 사진 자리.
+     * 문제가 없으면 null.
+     */
+    private suspend fun draftGate(post: PostContent, repairs: List<String>): DraftGate? {
+        val range = settings.modelPolicyOnce().targetLength
+        val issues = mutableListOf<String>()
+        val asks = mutableListOf<String>()
+        val length = bodyLength(post)
+        if (length < (range.first * (1 - LENGTH_TOLERANCE)).toInt() || length > (range.last * (1 + LENGTH_TOLERANCE)).toInt()) {
+            issues += "본문이 ${withCommas(length)}자예요. 목표는 ${withCommas(range.first)}~${withCommas(range.last)}자예요."
+            asks += "본문을 ${withCommas(range.first)}~${withCommas(range.last)}자로 맞춰 주세요."
+        }
+        refs(repairs, PostContentRepair.MISSING).takeIf { it.isNotEmpty() }?.let {
+            issues += "사진 $it 은 글에 없어서 맨 끝에 붙였어요."
+            asks += "사진 $it 은 어울리는 자리에 넣어 주세요."
+        }
+        refs(repairs, PostContentRepair.DUPLICATE).takeIf { it.isNotEmpty() }?.let {
+            issues += "사진 $it 이 두 번 나와서 한 번만 남겼어요."
+            asks += "사진 $it 은 한 번만 써 주세요."
+        }
+        return if (issues.isEmpty()) null else DraftGate(post, issues, asks.joinToString(" "))
+    }
+
+    /** 본문 글자 수 — 제목과 공백은 빼고 문단 글자만 센다. */
+    private fun bodyLength(post: PostContent): Int = post.blocks.filterIsInstance<Block.Paragraph>()
+        .sumOf { block -> block.runs.sumOf { run -> run.text.count { !it.isWhitespace() } } }
+
+    private fun refs(repairs: List<String>, prefix: String): String =
+        repairs.filter { it.startsWith(prefix) }.joinToString(", ") { it.removePrefix(prefix) }
+
+    private fun withCommas(value: Int) = String.format(Locale.KOREA, "%,d", value)
+
+    /**
+     * 첫 계획이 나오기 전까지 모델이 되물은 횟수. 메시지에서 세므로 대화를 다시 열어도 맞는다.
+     * 계획이 이미 있으면 그 앞까지만 센다 — 그 뒤로는 엔진이 이 값을 보지 않는다.
+     */
+    private fun questionRounds(history: List<ChatMessage>): Int {
+        val firstPlan = history.indexOfFirst { it.kind == MessageKind.PLAN }
+        val before = if (firstPlan < 0) history else history.subList(0, firstPlan)
+        return before.count { it.role == MessageRole.ASSISTANT && it.kind == MessageKind.TEXT }
     }
 
     /** 엔진이 post 를 낸 턴의 공통 처리: 발행 작업을 만들거나 갱신하고 패널을 연다. */

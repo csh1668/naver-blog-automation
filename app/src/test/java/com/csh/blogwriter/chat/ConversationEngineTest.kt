@@ -6,6 +6,7 @@ import com.csh.blogwriter.data.repo.MemoryKind
 import com.csh.blogwriter.data.repo.MemoryRepository
 import com.csh.blogwriter.data.repo.MessageKind
 import com.csh.blogwriter.data.repo.MessageRole
+import com.csh.blogwriter.domain.model.PostContent
 import com.csh.blogwriter.llm.ApiKey
 import com.csh.blogwriter.llm.ApiKeyStore
 import com.csh.blogwriter.llm.GeminiClient
@@ -309,5 +310,77 @@ class ConversationEngineTest {
     fun noUsableKeyFailsFast() = runTest {
         keys.value = emptyList()
         assertEquals(TurnResult.Reason.NO_KEY, (engine.runTurn(ctx(), Recorder()) as TurnResult.Failure).reason)
+    }
+    // ---- 사실 확인 루프 (계획 전) ----
+
+    /** 계획이 아직 없고 질문 횟수가 남았으면 "더 물어봐도 된다"는 지시가 붙는다. */
+    @Test
+    fun factCheckInstructionIsAskWhileRoundsRemain() = runTest {
+        server.enqueue(textResponse("""{"say":"몇 가지만 여쭐게요","question":"어디 다녀오셨어요?","quickReplies":["잘 모르겠어요"]}"""))
+        val r = engine.runTurn(ctx().copy(questionRounds = 1), Recorder()) as TurnResult.Success
+        assertEquals("어디 다녀오셨어요?", r.response.question)
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(body.contains(ConversationEngine.ASK_FACTS))
+        assertFalse(body.contains(ConversationEngine.STOP_ASKING))
+    }
+
+    /** 4번을 다 쓰면 지시가 "더 묻지 말고 계획을 내라"로 바뀐다. */
+    @Test
+    fun factCheckInstructionStopsAskingAtTheLimit() = runTest {
+        server.enqueue(textResponse("""{"say":"계획이에요","plan":"# 제목","readyToDraft":true}"""))
+        engine.runTurn(ctx().copy(questionRounds = 4), Recorder())
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(body.contains(ConversationEngine.STOP_ASKING))
+        assertFalse(body.contains(ConversationEngine.ASK_FACTS))
+    }
+
+    /** 계획이 나온 뒤(피드백 턴)와 초안 턴에는 사실 확인 지시가 빠진다. */
+    @Test
+    fun factCheckInstructionIsGoneOncePlanExistsAndOnDraftTurns() = runTest {
+        server.enqueue(textResponse("""{"say":"고쳤어요","plan":"# 제목","readyToDraft":true}"""))
+        engine.runTurn(ctx().copy(currentPlan = "# 제목"), Recorder())
+        val feedback = server.takeRequest().body.readUtf8()
+        assertFalse(feedback.contains(ConversationEngine.ASK_FACTS))
+        assertFalse(feedback.contains(ConversationEngine.STOP_ASKING))
+
+        server.enqueue(textResponse("""{"say":"초안이에요","readyToDraft":true}"""))
+        engine.runTurn(ctx(draft = true), Recorder())
+        val draft = server.takeRequest().body.readUtf8()
+        assertFalse(draft.contains(ConversationEngine.ASK_FACTS))
+        assertFalse(draft.contains(ConversationEngine.STOP_ASKING))
+    }
+
+    // ---- 턴별 thinking ----
+
+    @Test
+    fun draftAndRevisionTurnsAskForHighThinkingAndPlanTurnsForLow() = runTest {
+        server.enqueue(textResponse("""{"say":"초안이에요","readyToDraft":true}"""))
+        engine.runTurn(ctx(draft = true), Recorder())
+        assertTrue(server.takeRequest().body.readUtf8().contains(""""thinkingLevel":"high""""))
+
+        server.enqueue(textResponse("""{"say":"고쳤어요","readyToDraft":true}"""))
+        engine.runTurn(ctx().copy(currentPost = PostContent("제목", emptyList())), Recorder())
+        assertTrue(server.takeRequest().body.readUtf8().contains(""""thinkingLevel":"high""""))
+
+        server.enqueue(textResponse("""{"say":"계획이에요","plan":"# 제목","readyToDraft":true}"""))
+        engine.runTurn(ctx(), Recorder())
+        assertTrue(server.takeRequest().body.readUtf8().contains(""""thinkingLevel":"low""""))
+    }
+
+    /** thinking 을 안 받아 주는 모델이면 그 필드만 빼고 같은 pick 으로 한 번 더 — 스키마는 그대로 둔다. */
+    @Test
+    fun thinkingRejectionRetriesWithoutThinkingConfig() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(400)
+                .setBody("""{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"thinking_config not supported"}}""")
+        )
+        server.enqueue(textResponse("""{"say":"초안이에요","readyToDraft":true}"""))
+        val r = engine.runTurn(ctx(draft = true), Recorder()) as TurnResult.Success
+        assertEquals("초안이에요", r.response.say)
+        assertEquals(2, server.requestCount)
+        assertTrue(server.takeRequest().body.readUtf8().contains("thinkingConfig"))
+        val second = server.takeRequest().body.readUtf8()
+        assertFalse(second.contains("thinkingConfig"))
+        assertTrue(second.contains("responseJsonSchema"))
     }
 }

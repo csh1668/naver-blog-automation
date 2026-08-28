@@ -9,6 +9,7 @@ import com.csh.blogwriter.chat.TurnListener
 import com.csh.blogwriter.chat.TurnResponse
 import com.csh.blogwriter.chat.TurnResult
 import com.csh.blogwriter.chat.TurnRunner
+import com.csh.blogwriter.data.prefs.SettingsStore
 import com.csh.blogwriter.data.repo.ChatMessage
 import com.csh.blogwriter.data.repo.ChatRepository
 import com.csh.blogwriter.data.repo.ChatSession
@@ -145,6 +146,11 @@ class ChatViewModelTest {
         override fun clear(sessionId: String) { cleared += sessionId }
     }
 
+    private class FakeSettingsStore : SettingsStore {
+        override val blogId: Flow<String?> = flowOf(null)
+        override suspend fun setBlogId(id: String?) {}
+    }
+
     private class RecordingPublishedHook : PublishedHook {
         val published = mutableListOf<Pair<String, String>>()
         override suspend fun onPublished(sessionId: String, url: String) { published += sessionId to url }
@@ -181,10 +187,15 @@ class ChatViewModelTest {
     private var photos = FakePhotoAttachments()
 
     private fun newViewModel(hasKey: Boolean = true): ChatViewModel =
-        ChatViewModel(chatRepo, runner, pendingJobs, photos, FakeApiKeyStore(hasKey), memory, hook)
+        ChatViewModel(chatRepo, runner, pendingJobs, photos, FakeApiKeyStore(hasKey), memory, hook, FakeSettingsStore())
             .also { viewModel = it }
 
-    private fun post(title: String = "제목") = PostContent(title, listOf(Block.Paragraph(listOf(Run("본문")))))
+    /** 품질 게이트를 그냥 통과하는 초안 — 게이트 자체를 보는 테스트는 [longPost] 로 길이를 정한다. */
+    private fun post(title: String = "제목") = longPost(1300, title)
+
+    /** 본문 [length] 자(공백 없음)짜리 초안. */
+    private fun longPost(length: Int, title: String = "제목") =
+        PostContent(title, listOf(Block.Paragraph(listOf(Run("가".repeat(length))))))
 
     private companion object {
         const val PLAN = "# 원주 한우 후기\n다른 제목: A / B\n\n## 글 구성\n1. 도입 — 왜 갔는지 (사진 img_001)"
@@ -652,5 +663,154 @@ class ChatViewModelTest {
         // 빈 이름은 무시한다.
         vm.renameSession(sessionId, "   "); advanceUntilIdle()
         assertEquals("내가 지은 이름", vm.uiState.value.session!!.title)
+    }
+    // ---- 사실 확인 질문 (계획 전, 최대 4회) ----
+
+    /** 질문 턴이 이어지는 동안 questionRounds 가 오르고, 계획이 나온 뒤로는 초안 버튼 조건이 살아난다. */
+    @Test
+    fun questionTurnsCountUpAndKeepTheDraftButtonHidden() = runTest {
+        turns += TurnResult.Success(TurnResponse("어디 다녀오셨어요?", question = "상호가 어떻게 되나요?", readyToDraft = true), emptyList(), "flash")
+        turns += TurnResult.Success(TurnResponse("하나만 더요.", question = "얼마였나요?", quickReplies = listOf("잘 모르겠어요")), emptyList(), "flash")
+        turns += TurnResult.Success(TurnResponse("계획이에요", plan = PLAN, readyToDraft = true), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+
+        vm.send("원주 한우 다녀왔어요"); advanceUntilIdle()
+        // 질문 턴에서는 계획도 초안 버튼 조건도 없다. 모델이 readyToDraft 를 보내도 무시한다.
+        assertNull(vm.uiState.value.plan)
+        assertTrue(ChatPayloads.readText(vm.uiState.value.messages.last().payloadJson).contains("상호가 어떻게 되나요?"))
+
+        vm.send("봄들식당이에요"); advanceUntilIdle()
+        vm.send("2만원쯤이요"); advanceUntilIdle()
+
+        assertEquals(listOf(0, 1, 2), contexts.map { it.questionRounds })
+        assertEquals(4, contexts.first().maxQuestionRounds)
+        assertEquals(PLAN, vm.uiState.value.plan)
+    }
+
+    /** 질문 턴 뒤 초안을 요청해도 초안 턴은 열린다 — readyToDraft 는 send() 의 문구 판정에만 쓰인다. */
+    @Test
+    fun aQuestionTurnDoesNotMarkTheSessionReadyToDraft() = runTest {
+        turns += TurnResult.Success(TurnResponse("여쭤볼게요", question = "어디였나요?", readyToDraft = true), emptyList(), "flash")
+        turns += TurnResult.Success(TurnResponse("네", plan = PLAN), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.send("다녀왔어요"); advanceUntilIdle()
+
+        // "초안 써 줘" 라고 해도 아직 초안 턴이 아니다.
+        vm.send("초안 써 줘"); advanceUntilIdle()
+        assertFalse(contexts.last().draftTurn)
+    }
+
+    // ---- 품질 게이트 ----
+
+    /** 본문이 짧으면 에디터로 넘기지 않고 카드를 띄운다. */
+    @Test
+    fun aShortDraftIsHeldAtTheGate() = runTest {
+        turns += TurnResult.Success(TurnResponse("초안이에요", post = longPost(1000)), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.requestDraft(); advanceUntilIdle()
+
+        val gate = vm.uiState.value.draftGate
+        assertNotNull(gate)
+        assertEquals(listOf("본문이 1,000자예요. 목표는 1,200~1,800자예요."), gate!!.issues)
+        assertEquals("본문을 1,200~1,800자로 맞춰 주세요.", gate.request)
+        assertNull(vm.uiState.value.panelJobId)
+        assertTrue(pendingJobs.jobs.value.isEmpty())
+        assertTrue(vm.uiState.value.messages.none { it.kind == MessageKind.POST })
+    }
+
+    /** 허용 오차(±10%) 안이면 게이트 없이 바로 에디터로 간다. */
+    @Test
+    fun aDraftInsideTheToleranceGoesStraightThrough() = runTest {
+        turns += TurnResult.Success(TurnResponse("초안이에요", post = longPost(1100)), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.requestDraft(); advanceUntilIdle()
+
+        assertNull(vm.uiState.value.draftGate)
+        assertNotNull(vm.uiState.value.panelJobId)
+        assertEquals(1, pendingJobs.jobs.value.size)
+    }
+
+    /** 엔진이 사진 자리를 손댔으면(누락·중복) 길이가 맞아도 한 번 물어본다. */
+    @Test
+    fun photoRepairsAlsoHoldTheDraft() = runTest {
+        turns += TurnResult.Success(
+            TurnResponse("초안이에요", post = longPost(1300)),
+            listOf("누락 사진 추가: img_003", "중복 사진 제거: img_002", "제목 보정"),
+            "flash",
+        )
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.requestDraft(); advanceUntilIdle()
+
+        val gate = vm.uiState.value.draftGate!!
+        assertEquals(
+            listOf("사진 img_003 은 글에 없어서 맨 끝에 붙였어요.", "사진 img_002 이 두 번 나와서 한 번만 남겼어요."),
+            gate.issues,
+        )
+        assertEquals("사진 img_003 은 어울리는 자리에 넣어 주세요. 사진 img_002 은 한 번만 써 주세요.", gate.request)
+    }
+
+    /** "이대로 넣기" — 잡아 뒀던 초안을 그대로 저장하고 패널을 연다. */
+    @Test
+    fun acceptingTheGateSavesTheJobAndOpensThePanel() = runTest {
+        turns += TurnResult.Success(TurnResponse("초안이에요", post = longPost(1000, "짧은 초안")), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.requestDraft(); advanceUntilIdle()
+        assertNotNull(vm.uiState.value.draftGate)
+
+        vm.acceptDraftGate(); advanceUntilIdle()
+
+        assertNull(vm.uiState.value.draftGate)
+        assertNotNull(vm.uiState.value.panelJobId)
+        assertTrue(vm.uiState.value.panelOpen)
+        assertEquals("짧은 초안", pendingJobs.jobs.value.single().content.title)
+        assertEquals(1, vm.uiState.value.messages.count { it.kind == MessageKind.POST })
+    }
+
+    /** "고쳐 달라고 하기" — 고쳐 달라는 말이 사용자 메시지로 나가고, 초안이 없으니 초안 턴이 다시 돈다. */
+    @Test
+    fun askingForAFixSendsTheRequestAsTheNextTurn() = runTest {
+        turns += TurnResult.Success(TurnResponse("초안이에요", post = longPost(1000)), emptyList(), "flash")
+        turns += TurnResult.Success(TurnResponse("길게 고쳤어요", post = longPost(1500)), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.requestDraft(); advanceUntilIdle()
+
+        vm.fixDraftGate(); advanceUntilIdle()
+
+        assertNull(vm.uiState.value.draftGate)
+        assertTrue(contexts.last().draftTurn)
+        val sent = vm.uiState.value.messages.filter { it.role == MessageRole.USER }.map { ChatPayloads.readText(it.payloadJson) }
+        assertTrue(sent.toString(), sent.contains("본문을 1,200~1,800자로 맞춰 주세요."))
+        assertNotNull(vm.uiState.value.panelJobId)
+    }
+
+    /** 초안이 이미 있으면 고쳐 달라는 턴은 수정 턴이다 — 지금 초안이 함께 실려 나간다. */
+    @Test
+    fun askingForAFixOnAnExistingDraftIsARevisionTurn() = runTest {
+        turns += TurnResult.Success(TurnResponse("초안이에요", post = longPost(1500, "첫 제목")), emptyList(), "flash")
+        turns += TurnResult.Success(TurnResponse("고쳤어요", post = longPost(1000, "둘째 제목")), emptyList(), "flash")
+        turns += TurnResult.Success(TurnResponse("다시 고쳤어요", post = longPost(1500, "셋째 제목")), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.requestDraft(); advanceUntilIdle()
+        vm.send("더 짧게"); advanceUntilIdle()
+        assertNotNull(vm.uiState.value.draftGate)
+
+        vm.fixDraftGate(); advanceUntilIdle()
+
+        assertFalse(contexts.last().draftTurn)
+        assertEquals("첫 제목", contexts.last().currentPost?.title)
+        assertEquals("셋째 제목", pendingJobs.jobs.value.single().content.title)
+    }
+
+    /** 다음 턴이 시작되면 잡아 뒀던 게이트는 버린다 — 턴마다 새로 계산한다. */
+    @Test
+    fun aNewTurnClearsThePendingGate() = runTest {
+        turns += TurnResult.Success(TurnResponse("초안이에요", post = longPost(1000)), emptyList(), "flash")
+        turns += TurnResult.Success(TurnResponse("계획이에요", plan = PLAN), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.requestDraft(); advanceUntilIdle()
+        assertNotNull(vm.uiState.value.draftGate)
+
+        vm.send("아니요 다시 얘기해요"); advanceUntilIdle()
+        assertNull(vm.uiState.value.draftGate)
     }
 }

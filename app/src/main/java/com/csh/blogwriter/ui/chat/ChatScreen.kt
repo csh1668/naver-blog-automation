@@ -298,10 +298,11 @@ private fun ChatPane(
             ui.streamingSay?.let { partial -> item { MessageBubble(partial, mine = false) } }
             if (ui.thinking) item { ToolStatusLine(ui.toolStatus) }
         }
+        ui.draftGate?.let { gate -> DraftGateCard(gate, viewModel) }
         QuickReplyChips(ui.quickReplies) { justSent = true; viewModel.sendQuickReply(it) }
         AttachmentTray(ui.tray, viewModel)
         // 계획이 있고 아직 초안이 없는 동안에는 초안 버튼이 입력창 위에 늘 걸려 있다.
-        if (ui.plan != null && ui.panelJobId == null && !ui.thinking) {
+        if (ui.plan != null && ui.panelJobId == null && !ui.thinking && ui.draftGate == null) {
             Box(Modifier.padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
                 BottomCta(
                     ChatViewModel.DRAFT_CHIP,
@@ -328,6 +329,27 @@ private fun ChatPane(
             placeholder = if (ui.thinking) "글을 구상하고 있어요" else "오늘 있었던 일을 들려주세요",
             canAttach = ui.panelJobId == null,
         )
+    }
+}
+
+/** 글자 수나 사진 쓰임이 걸린 초안을 에디터에 넣기 전에 한 번 물어보는 카드. */
+@Composable
+private fun DraftGateCard(gate: DraftGate, viewModel: ChatViewModel) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
+        InlineBanner(ChatViewModel.GATE_TITLE, BannerKind.Warning)
+        gate.issues.forEach { issue ->
+            Text(
+                issue,
+                style = AppTheme.typography.body2,
+                color = AppTheme.colors.textSecondary,
+                modifier = Modifier.padding(horizontal = AppSpacing.sm, vertical = AppSpacing.xs),
+            )
+        }
+        Spacer(Modifier.height(AppSpacing.sm))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+            Box(Modifier.weight(1f)) { WeakButton(ChatViewModel.GATE_FIX, onClick = viewModel::fixDraftGate) }
+            Box(Modifier.weight(1f)) { BottomCta(ChatViewModel.GATE_ACCEPT, onClick = viewModel::acceptDraftGate) }
+        }
     }
 }
 

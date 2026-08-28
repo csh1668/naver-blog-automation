@@ -13,6 +13,9 @@ data class ChatContext(
     /** 지금 오른쪽에 걸려 있는 계획(마크다운). 있으면 "이 계획을 고쳐라"가 된다. */
     val currentPlan: String? = null,
     val currentPost: PostContent?,
+    /** 계획을 내지 않고 되물은 횟수. [maxQuestionRounds] 에 닿으면 더 묻지 말고 계획을 내라고 한다. */
+    val questionRounds: Int = 0,
+    val maxQuestionRounds: Int = 4,
 )
 
 sealed interface TurnResult {

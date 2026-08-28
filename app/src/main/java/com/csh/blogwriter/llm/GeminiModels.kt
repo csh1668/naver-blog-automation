@@ -18,11 +18,14 @@ import kotlinx.serialization.json.JsonObject
 @Serializable data class GTool(val functionDeclarations: List<GFunctionDeclaration>)
 @Serializable data class GFunctionCallingConfig(val mode: String)
 @Serializable data class GToolConfig(val functionCallingConfig: GFunctionCallingConfig)
+/** 턴마다 생각 예산을 조절한다 — 초안·수정은 "high", 질문·계획·피드백은 "low". */
+@Serializable data class GThinkingConfig(val thinkingLevel: String)
 @Serializable data class GGenerationConfig(
     val temperature: Double? = null,
     val maxOutputTokens: Int? = null,
     val responseMimeType: String? = null,
     val responseJsonSchema: JsonObject? = null,
+    val thinkingConfig: GThinkingConfig? = null,
 )
 @Serializable data class GRequest(
     val contents: List<GContent>,

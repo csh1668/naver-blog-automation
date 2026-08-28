@@ -16,6 +16,7 @@ import com.csh.blogwriter.llm.GInlineData
 import com.csh.blogwriter.llm.GPart
 import com.csh.blogwriter.llm.GRequest
 import com.csh.blogwriter.llm.GSystemInstruction
+import com.csh.blogwriter.llm.GThinkingConfig
 import com.csh.blogwriter.llm.GTool
 import com.csh.blogwriter.llm.GToolConfig
 import com.csh.blogwriter.llm.GeminiClient
@@ -50,6 +51,11 @@ class ConversationEngine(
         const val MAX_TOOL_ROUNDS = 6
         private const val JSON_ONLY_HINT = "\n\n반드시 JSON 객체 하나만 출력하세요. 코드 펜스나 설명을 붙이지 마세요."
         private const val TRUNCATED = "응답이 너무 길어 잘렸어요"
+        /** 계획을 내기 전, 아직 더 물어봐도 되는 턴에 붙인다. */
+        const val ASK_FACTS = "글에 꼭 필요한 사실(상호·제품명, 위치, 먹거나 산 것과 가격, 방문 계기·동행, 좋았던 점·아쉬웠던 점)이 " +
+            "비어 있으면 question 으로 한 번에 1~2개만 묻고 plan 은 비워 두세요. 이미 충분하면 바로 plan 을 내세요."
+        /** 질문 횟수를 다 쓴 턴에 붙인다. */
+        const val STOP_ASKING = "더 묻지 말고 지금 있는 정보로 plan 을 내세요. 모르는 값은 검색해서 채우거나 '(확인 필요)' 로 표시하세요."
     }
 
     /** 싱글턴이라 여러 화면에서 동시에 들어올 수 있다 — 로테이터 재사용/재생성은 잠금 안에서. */
@@ -73,6 +79,9 @@ class ConversationEngine(
         val tools = toolsFactory()
 
         var useSchema = true
+        // 초안·수정 턴만 생각을 깊게 시킨다. 질문·계획·피드백은 짧게 — 한도와 응답 시간을 아낀다.
+        val thinkingLevel = if (ctx.draftTurn || ctx.currentPost != null) "high" else "low"
+        var useThinking = true
         // 이번 "턴" 전체에 한 번만 주는 무료 재시도. pick 마다 주면 시도 상한이 흐려진다.
         var transientRetried = false
         // 이번 턴에 하드 4xx(404 모델 없음 등)를 낸 모델 — 다음 pick 부터 건너뛴다.
@@ -98,7 +107,10 @@ class ConversationEngine(
             val secret = keys.firstOrNull { it.id == pick.keyId }?.secret ?: continue
             try {
                 Log.d(TAG, "attempt $attempts/$maxAttempts model=${pick.model} key=…${pick.keyId.takeLast(4)} schema=$useSchema")
-                val result = runWithTools(secret, pick.model, system, contents, attachedRefs, policy, useSchema, tools, listener)
+                val result = runWithTools(
+                    secret, pick.model, system, contents, attachedRefs, policy, useSchema,
+                    if (useThinking) thinkingLevel else null, tools, listener,
+                )
                 Log.d(TAG, "attempt $attempts ok model=${pick.model}")
                 rot.report(pick, KeyRotator.Outcome.SUCCESS)
                 memory.touch(memItems.map { it.id })
@@ -111,6 +123,9 @@ class ConversationEngine(
                     GeminiException.Kind.RATE_LIMITED -> { rot.report(pick, KeyRotator.Outcome.RATE_LIMITED); keyStore.markLimited(pick.keyId) }
                     GeminiException.Kind.INVALID_KEY -> { rot.report(pick, KeyRotator.Outcome.INVALID_KEY); keyStore.markInvalid(pick.keyId) }
                     GeminiException.Kind.BAD_REQUEST -> when {
+                        // 400 이 thinking 을 가리키면 이 필드를 안 받아 주는 모델 — 빼고 같은 pick 으로 한 번 더(시도 횟수 미차감).
+                        e.code == 400 && useThinking && lastDetail.contains("thinking", ignoreCase = true) ->
+                            { useThinking = false; attempts-- }
                         // 400 이고 스키마를 보냈다면 스키마를 안 받아 주는 모델 — 스키마 없이 같은 pick 으로 한 번 더(시도 횟수 미차감).
                         e.code == 400 && useSchema -> { useSchema = false; attempts-- }
                         e.code == 400 -> return TurnResult.Failure(TurnResult.Reason.OTHER, detail = lastDetail)
@@ -158,6 +173,7 @@ class ConversationEngine(
         attachedRefs: List<String>,
         policy: ModelPolicy,
         useSchema: Boolean,
+        thinkingLevel: String?,
         tools: ToolExecutor,
         listener: TurnListener,
     ): TurnResult.Success {
@@ -177,6 +193,7 @@ class ConversationEngine(
                     maxOutputTokens = 16384,
                     responseMimeType = if (useSchema) "application/json" else null,
                     responseJsonSchema = if (useSchema) TurnSchemas.turnResponseJsonSchema() else null,
+                    thinkingConfig = thinkingLevel?.let { GThinkingConfig(it) },
                 ),
             )
             var text = ""
@@ -254,6 +271,11 @@ class ConversationEngine(
             out += GContent("user", listOf(GPart(text = "현재 초안(JSON): " + PostContentJson.encode(ctx.currentPost) + "\n요청을 반영해 수정된 전체 post 를 다시 내 주세요.")))
         }
         if (ctx.draftTurn) out += GContent("user", listOf(GPart(text = "이번 턴에는 post 를 채워 완성 초안을 내 주세요.")))
+        // 사실 확인 루프는 "계획을 내기 전"에만 돈다 — 계획이 나온 뒤(피드백)나 초안·수정 턴에는 붙이지 않는다.
+        if (!ctx.draftTurn && ctx.currentPlan == null && ctx.currentPost == null) {
+            val ask = if (ctx.questionRounds < ctx.maxQuestionRounds) ASK_FACTS else STOP_ASKING
+            out += GContent("user", listOf(GPart(text = ask)))
+        }
         return out
     }
 }

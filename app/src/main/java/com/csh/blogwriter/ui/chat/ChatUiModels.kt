@@ -29,6 +29,8 @@ data class ChatUiState(
     val panelOpen: Boolean = false,
     val listCollapsed: Boolean = false,
     val hasKey: Boolean = true,
+    /** 에디터에 넣기 전에 잡아 둔 초안. 사용자가 "이대로 넣기"를 고르면 그대로 진행한다. */
+    val draftGate: DraftGate? = null,
     /** [attachments] 중 여기부터가 "아직 안 보낸" 사진 — 입력창 위 사진판에 보여 주고 보내면 비운다. */
     val trayFrom: Int = 0,
 ) {
@@ -41,6 +43,14 @@ data class ChatUiState(
     /** 오른쪽에 보여 줄 것이 있는가 — 계획이든 초안이든. */
     val hasPanel: Boolean get() = panelJobId != null || plan != null
 }
+
+/**
+ * 글자 수나 사진 쓰임에 걸린 초안. 대화에 카드 하나로 보이고, 사용자가 넣을지 고쳐 달라고 할지 고른다.
+ * 메모리 상태라 대화를 바꾸거나 다시 열면 사라진다.
+ *
+ * @param request "고쳐 달라고 하기"를 누르면 사용자 메시지로 자동 전송할 문장.
+ */
+data class DraftGate(val post: PostContent, val issues: List<String>, val request: String)
 
 /** 사진 첨부 메시지의 내용. */
 data class PhotosPayload(val count: Int, val refs: List<String>, val uris: List<String>)
