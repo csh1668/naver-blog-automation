@@ -12,11 +12,21 @@ object PublishUrlParser {
 
     fun parsePublished(url: String): PublishedPost? {
         val uri = runCatching { URI(url) }.getOrNull() ?: return null
-        if (uri.host != "blog.naver.com" || uri.path != "/PostView.naver") return null
+        if (uri.host != "blog.naver.com") return null
+        if (uri.path != "/PostView.naver") return parsePermalink(uri.path)
         val query = queryMap(uri.rawQuery ?: return null)
         if (query["isAfterWrite"] != "true") return null
         val blogId = query["blogId"]?.takeIf { it.isNotBlank() } ?: return null
         val logNo = query["logNo"]?.takeIf { it.all(Char::isDigit) && it.isNotEmpty() } ?: return null
+        return PublishedPost(blogId, logNo)
+    }
+
+    /** 발행 직후 에디터 페이지는 상단 프레임을 다시 읽지 않고 pushState 로 `/{blogId}/{logNo}` 만 남긴다. */
+    private fun parsePermalink(path: String?): PublishedPost? {
+        val segments = (path ?: return null).trim('/').split('/')
+        if (segments.size != 2) return null
+        val (blogId, logNo) = segments
+        if (blogId.isBlank() || logNo.isEmpty() || !logNo.all(Char::isDigit)) return null
         return PublishedPost(blogId, logNo)
     }
 
