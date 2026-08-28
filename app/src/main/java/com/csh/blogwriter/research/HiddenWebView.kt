@@ -46,14 +46,17 @@ class HiddenWebView(private val context: Context) {
     suspend fun loadAndExtract(url: String, script: String, timeoutMs: Long): String? = lock.withLock {
         withContext(Dispatchers.Main) {
             val w = view()
-            val targetHost = runCatching { Uri.parse(url).host }.getOrNull()
+            // 호스트를 정확히 비교하면 search.naver.com→m.search.naver.com, www.google.com→consent.google.com
+            // 같은 정상 리다이렉트도 타임아웃 나 버린다 — 등록 가능 도메인(라스트 2~3 라벨)만 맞춰본다.
+            val targetDomain = runCatching { Uri.parse(url).host }.getOrNull()?.let(::registrableDomain)
             val myGen = ++generation
             val result = withTimeoutOrNull(timeoutMs) {
                 suspendCancellableCoroutine<Unit> { cont ->
                     onLoaded = { finishedUrl ->
-                        // 리다이렉트 중간 페이지·이전 호출의 늦은 콜백은 무시하고 목표 호스트에 도달했을 때만 진행한다.
-                        val finishedHost = runCatching { Uri.parse(finishedUrl).host }.getOrNull()
-                        if (myGen == generation && cont.isActive && (targetHost == null || finishedHost == targetHost)) cont.resume(Unit)
+                        // 리다이렉트 중간 페이지·이전 호출의 늦은 콜백은 무시하고 목표 도메인에 도달했을 때만 진행한다.
+                        val finishedDomain = runCatching { Uri.parse(finishedUrl).host }.getOrNull()?.let(::registrableDomain)
+                        val sameDomain = targetDomain == null || finishedDomain == targetDomain
+                        if (myGen == generation && cont.isActive && sameDomain) cont.resume(Unit)
                     }
                     w.loadUrl(url)
                 }

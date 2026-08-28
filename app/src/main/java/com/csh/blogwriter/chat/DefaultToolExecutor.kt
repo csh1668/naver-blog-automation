@@ -39,12 +39,12 @@ class DefaultToolExecutor @Inject constructor(
                     val q = args["query"]?.jsonPrimitive?.content.orEmpty()
                     onProgress("네이버에서 '$q' 정보를 찾고 있어요…")
                     val hits = research.search(q)
-                    allowedUrls += hits.map { it.url }
+                    allowedUrls += hits.map { normalizeUrl(it.url) }
                     buildJsonObject { put("results", buildJsonArray { hits.forEach { h -> add(buildJsonObject { put("title", h.title); put("url", h.url); put("snippet", h.snippet) }) } }) }
                 }
                 "open_page" -> {
                     val url = args["url"]?.jsonPrimitive?.content.orEmpty()
-                    if (url !in allowedUrls) {
+                    if (normalizeUrl(url) !in allowedUrls) {
                         buildJsonObject { put("error", "not_allowed") }
                     } else {
                         onProgress("'${runCatching { java.net.URI(url).host }.getOrNull() ?: url}' 페이지를 읽고 있어요…")
@@ -64,4 +64,16 @@ class DefaultToolExecutor @Inject constructor(
             throw e
         } catch (e: Exception) { buildJsonObject { put("error", e.message ?: "실패") } }
     }
+}
+
+/** 스킴/호스트는 소문자로, fragment 는 버리고, path 끝의 슬래시 하나는 지운다. query 는 그대로 둔다. */
+internal fun normalizeUrl(u: String): String {
+    val noFragment = u.substringBefore("#")
+    val uri = runCatching { java.net.URI(noFragment) }.getOrNull() ?: return noFragment
+    val scheme = uri.scheme?.lowercase().orEmpty()
+    val host = uri.host?.lowercase().orEmpty()
+    val port = if (uri.port != -1) ":${uri.port}" else ""
+    val path = uri.rawPath.orEmpty().let { if (it.endsWith("/")) it.dropLast(1) else it }
+    val query = uri.rawQuery?.let { "?$it" }.orEmpty()
+    return "$scheme://$host$port$path$query"
 }

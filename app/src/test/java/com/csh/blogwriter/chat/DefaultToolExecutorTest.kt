@@ -94,6 +94,22 @@ class DefaultToolExecutorTest {
     }
 
     @Test
+    fun openPageAllowsHitUrlEchoedWithTrailingSlashOrFragment() = runTest {
+        val openedUrls = mutableListOf<String>()
+        val capturingResearch = object : ResearchTool {
+            override suspend fun search(query: String) = listOf(SearchHit("원주 한우 맛집", "https://blog.naver.com/x/1", "요약"))
+            override suspend fun openPage(url: String): PageText? { openedUrls += url; return PageText("제목", "본문 텍스트") }
+        }
+        val ex = DefaultToolExecutor(capturingResearch, memory, settings)
+        ex.execute("web_search", buildJsonObject { put("query", "원주 한우") }) {}
+        val echoed = "https://blog.naver.com/x/1/#review"
+        val r = ex.execute("open_page", buildJsonObject { put("url", echoed) }) {}
+        assertEquals("제목", r["title"]!!.jsonPrimitive.content)
+        // 정규화는 허용 여부 판단에만 쓰고, research 에는 모델이 준 원래 url 을 그대로 넘긴다.
+        assertEquals(listOf(echoed), openedUrls)
+    }
+
+    @Test
     fun cancellationIsNotSwallowed() = runTest {
         val cancellingResearch = object : ResearchTool {
             override suspend fun search(query: String): List<SearchHit> = throw CancellationException("cancelled")
