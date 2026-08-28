@@ -56,6 +56,13 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.focus.FocusManager
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlin.math.roundToInt
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import android.os.Bundle
@@ -129,6 +136,7 @@ fun ChatScreen(
 
     // 입력창에 커서가 있는 동안에는 채팅 쪽을 넓혀 준다 — 오른쪽 패널이 말할 자리를 덜 뺏도록.
     var composerFocused by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
 
     BoxWithConstraints(Modifier.fillMaxSize().background(AppTheme.colors.background)) {
         val screenWidth = maxWidth
@@ -141,6 +149,8 @@ fun ChatScreen(
         // 안쪽(내용)과 바깥쪽(보이는 폭)을 같은 스펙으로 따로 움직인다 —
         // 접을 때는 바깥만 0 으로 줄어 WebView 는 제 폭 그대로 살아 있는다.
         val panelWidth by animateDpAsState(targetPanelWidth, tween(200), label = "panelContentWidth")
+        // 에디터 페이지는 화면 전체 폭 기준 PC 레이아웃 — 패널 비율만큼 축소해 가로 스크롤을 없앤다.
+        val editorScalePercent = (targetPanelWidth.value / screenWidth.value * 100f).roundToInt().coerceIn(30, 100)
         val shownPanelWidth by animateDpAsState(
             targetValue = if (ui.panelOpen) (if (wide) targetPanelWidth else screenWidth) else 0.dp,
             animationSpec = tween(200), label = "panelWidth",
@@ -148,7 +158,7 @@ fun ChatScreen(
 
         if (wide) {
             Row(Modifier.fillMaxSize()) {
-                Box(Modifier.width(if (ui.listCollapsed) SessionRailWidth else SessionListWidth).fillMaxHeight().statusBarsPadding()) {
+                Box(Modifier.width(if (ui.listCollapsed) SessionRailWidth else SessionListWidth).fillMaxHeight().statusBarsPadding().clearFocusOnPress(focusManager)) {
                     SessionListPane(
                         sessions = sessions,
                         currentId = ui.session?.id,
@@ -172,10 +182,10 @@ fun ChatScreen(
                 )
                 if (panelMountedNow) {
                     // 접을 때는 폭만 0 으로 줄인다 — 컴포지션에 남아 있어야 WebView 와 편집 내용이 살아남는다.
-                    Box(Modifier.width(shownPanelWidth).fillMaxHeight().clipToBounds()) {
+                    Box(Modifier.width(shownPanelWidth).fillMaxHeight().clipToBounds().clearFocusOnPress(focusManager)) {
                         Box(Modifier.requiredWidth(panelWidth).fillMaxHeight()) {
                             if (planMarkdown != null) PlanPanel(planMarkdown, onSave = viewModel::savePlanEdit)
-                            else PanelHost(ui.panelJobId, viewModel, onSessionExpired, onFailed) { panelStatus = it }
+                            else PanelHost(ui.panelJobId, viewModel, onSessionExpired, onFailed, editorScalePercent) { panelStatus = it }
                         }
                     }
                 }
@@ -224,7 +234,7 @@ fun ChatScreen(
                         }
                         Box(Modifier.weight(1f)) {
                             if (planMarkdown != null) PlanPanel(planMarkdown, onSave = viewModel::savePlanEdit)
-                            else PanelHost(ui.panelJobId, viewModel, onSessionExpired, onFailed) { panelStatus = it }
+                            else PanelHost(ui.panelJobId, viewModel, onSessionExpired, onFailed, 100) { panelStatus = it }
                         }
                     }
                 }
@@ -349,7 +359,7 @@ private fun ChatPane(
         } else {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = AppSpacing.lg),
+                modifier = Modifier.clearFocusOnPress(focusManager).weight(1f).fillMaxWidth().padding(horizontal = AppSpacing.lg),
                 verticalArrangement = Arrangement.spacedBy(AppSpacing.xs),
             ) {
                 items(ui.messages, key = { it.id }) { message -> MessageItem(message, ui.panelOpen, viewModel) }
@@ -470,6 +480,7 @@ private fun PanelHost(
     chatViewModel: ChatViewModel,
     onSessionExpired: (jobId: String) -> Unit,
     onFailed: (jobId: String) -> Unit,
+    scalePercent: Int,
     onStatus: (String?) -> Unit,
 ) {
     if (jobId == null) return
@@ -490,7 +501,19 @@ private fun PanelHost(
         onSessionExpired = onSessionExpired,
         onFailed = onFailed,
         onCancelRequest = chatViewModel::togglePanel,
+        contentScalePercent = scalePercent,
     )
+}
+
+/**
+ * 입력창 밖(대화 목록·메시지·오른쪽 패널)을 누르면 입력창의 커서를 놓는다 — 그래야 패널 비율이 3:7 로 돌아온다.
+ * Initial 단계에서 엿보기만 하므로 자식(WebView 포함)의 터치 처리는 그대로다.
+ */
+private fun Modifier.clearFocusOnPress(focusManager: FocusManager): Modifier = pointerInput(focusManager) {
+    awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        focusManager.clearFocus()
+    }
 }
 
 /**

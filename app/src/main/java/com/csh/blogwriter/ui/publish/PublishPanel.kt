@@ -37,6 +37,8 @@ fun PublishPanel(
     onSessionExpired: (jobId: String) -> Unit,
     onFailed: (jobId: String) -> Unit,
     onCancelRequest: () -> Unit,
+    /** 에디터 페이지 축소 비율(%). 채팅 옆 패널이면 패널 폭 / 화면 폭, 전체 화면이면 100. */
+    contentScalePercent: Int = 100,
 ) {
     val ui by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -51,8 +53,9 @@ fun PublishPanel(
             override fun onInjected(componentCount: Int) = viewModel.onInjected(componentCount)
             override fun onError(step: String, message: String) = viewModel.onJsError(step, message)
             override fun onLog(message: String) = Unit
-        })
+        }).also { it.setScalePercent(contentScalePercent) }
     }
+    LaunchedEffect(contentScalePercent) { editor.setScalePercent(contentScalePercent) }
     DisposableEffect(editor) {
         viewModel.attach(editor)
         onDispose { viewModel.detach(); editor.destroy() }

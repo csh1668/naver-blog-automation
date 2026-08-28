@@ -62,6 +62,23 @@ class NaverEditorWebView(context: Context, private val listener: Listener) : Edi
 
     override fun loadEditor(blogId: String) = view.loadUrl(NaverWebViewConfig.writeUrl(blogId))
 
+    private var scalePercent = 100
+
+    /**
+     * 에디터 페이지는 PC 레이아웃(화면 전체 폭 기준)이다. 오른쪽 패널이 화면의 70%/50% 만 차지할 때
+     * 페이지를 그 비율로 축소해 가로 스크롤 없이 한 화면에 들어오게 한다. 로드 전엔 초기 배율로,
+     * 이미 떠 있으면 zoomBy 로 즉시 맞춘다.
+     */
+    fun setScalePercent(percent: Int) {
+        scalePercent = percent.coerceIn(25, 100)
+        view.setInitialScale(scalePercent)
+        if (view.url != null) {
+            val target = scalePercent / 100f * view.resources.displayMetrics.density
+            @Suppress("DEPRECATION") val current = view.scale
+            if (current > 0f) view.zoomBy((target / current).coerceIn(0.01f, 100f))
+        }
+    }
+
     override fun setLocalImages(images: List<PreparedImage>) {
         interceptor = LocalImageInterceptor(images.associate { it.ref to it.file })
     }
