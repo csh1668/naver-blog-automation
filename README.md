@@ -41,7 +41,7 @@ Gemini 무료 등급은 키(=프로젝트)마다 따로 적용된다. 2026-08-28
 ## 릴리스
 1. 최초 1회 서명 키 생성: `keytool -genkeypair -v -keystore release.jks -alias blogwriter -keyalg RSA -keysize 2048 -validity 10000`
 2. GitHub Secrets 등록: `KEYSTORE_BASE64`(`base64 -w0 release.jks`), `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`
-3. `git tag v0.2.0 && git push origin v0.2.0` → Releases 에 `blogwriter-v0.2.0.apk` 첨부
+3. `git tag v0.3.0 && git push origin v0.3.0` → Releases 에 `blogwriter-v0.3.0.apk` 첨부
 4. 태블릿에서 Release 페이지의 APK 를 내려받아 설치 (출처를 알 수 없는 앱 허용 필요)
 
 로컬 서명 빌드: 루트에 `keystore.properties` (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`) 를 두고 `./gradlew :app:assembleRelease`.

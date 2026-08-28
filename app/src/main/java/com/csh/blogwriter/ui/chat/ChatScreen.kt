@@ -63,6 +63,8 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlin.math.roundToInt
 import androidx.compose.ui.composed
+import androidx.compose.ui.platform.LocalUriHandler
+import com.csh.blogwriter.data.repo.SessionStatus
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import android.os.Bundle
@@ -369,7 +371,8 @@ private fun ChatPane(
             QuickReplyChips(ui.quickReplies) { justSent = true; viewModel.sendQuickReply(it) }
             AttachmentTray(ui.tray, viewModel)
             // 계획이 있고 아직 초안이 없는 동안에는 초안 버튼이 입력창 위에 늘 걸려 있다.
-            if (ui.plan != null && ui.panelJobId == null && !ui.thinking && ui.draftGate == null) {
+            val published = ui.session?.status == SessionStatus.PUBLISHED
+            if (ui.plan != null && ui.panelJobId == null && !ui.thinking && ui.draftGate == null && !published) {
                 Box(Modifier.padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
                     BottomCta(
                         ChatViewModel.DRAFT_CHIP,
@@ -468,7 +471,13 @@ private fun MessageItem(message: ChatMessage, panelOpen: Boolean, viewModel: Cha
                 }
             }
         }
-        MessageKind.SYSTEM -> SystemMessage { InlineBanner(ChatPayloads.readText(message.payloadJson), BannerKind.Info) }
+        MessageKind.SYSTEM -> SystemMessage {
+            val text = ChatPayloads.readText(message.payloadJson)
+            val url = Regex("""https?://\S+""").find(text)?.value
+            val uriHandler = LocalUriHandler.current
+            // 발행 링크처럼 주소가 들어 있으면 배너 전체를 눌러 열 수 있게 한다.
+            InlineBanner(text, if (url != null) BannerKind.Success else BannerKind.Info, onClick = url?.let { { uriHandler.openUri(it) } })
+        }
     }
 }
 
