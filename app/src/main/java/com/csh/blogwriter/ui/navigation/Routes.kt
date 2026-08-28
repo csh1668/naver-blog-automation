@@ -11,4 +11,9 @@ object Routes {
     @Serializable data class Fallback(val jobId: String)
     @Serializable data object History
     @Serializable data object FailureLogs
+    @Serializable data object Admin
+    @Serializable data object ApiKeys
+    @Serializable data object Models
+    @Serializable data object Prompts
+    @Serializable data object Memory
 }

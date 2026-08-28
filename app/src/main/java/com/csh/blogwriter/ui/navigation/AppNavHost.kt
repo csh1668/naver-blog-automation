@@ -1,17 +1,25 @@
 package com.csh.blogwriter.ui.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import com.csh.blogwriter.ui.admin.ApiKeysScreen
 import com.csh.blogwriter.ui.admin.FailureLogScreen
+import com.csh.blogwriter.ui.admin.ModelsScreen
+import com.csh.blogwriter.ui.admin.PinGateScreen
+import com.csh.blogwriter.ui.admin.SettingsScreen
 import com.csh.blogwriter.ui.compose.TestComposeScreen
 import com.csh.blogwriter.ui.fallback.FallbackScreen
 import com.csh.blogwriter.ui.history.HistoryScreen
 import com.csh.blogwriter.ui.home.HomeScreen
 import com.csh.blogwriter.ui.login.LoginScreen
 import com.csh.blogwriter.ui.publish.PublishScreen
+
+private const val PIN_PASSED_KEY = "pin_passed"
 
 @Composable
 fun AppNavHost() {
@@ -23,7 +31,7 @@ fun AppNavHost() {
                 onLogin = { returnTo -> nav.navigate(Routes.Login(returnTo)) },
                 onResumePending = { jobId -> nav.navigate(Routes.Publish(jobId)) },
                 onHistory = { nav.navigate(Routes.History) },
-                onAdmin = { nav.navigate(Routes.FailureLogs) },
+                onAdmin = { nav.navigate(Routes.Admin) },
             )
         }
         composable<Routes.Login> { entry ->
@@ -62,5 +70,27 @@ fun AppNavHost() {
         }
         composable<Routes.History> { HistoryScreen(onBack = { nav.popBackStack() }) }
         composable<Routes.FailureLogs> { FailureLogScreen(onBack = { nav.popBackStack() }) }
+        composable<Routes.Admin> { entry ->
+            val passed by entry.savedStateHandle.getStateFlow(PIN_PASSED_KEY, false).collectAsStateWithLifecycle()
+            if (!passed) {
+                PinGateScreen(
+                    onPassed = { entry.savedStateHandle[PIN_PASSED_KEY] = true },
+                    onBack = { nav.popBackStack() },
+                )
+            } else {
+                SettingsScreen(
+                    onApiKeys = { nav.navigate(Routes.ApiKeys) },
+                    onModels = { nav.navigate(Routes.Models) },
+                    onPrompts = { nav.navigate(Routes.Prompts) },
+                    onMemory = { nav.navigate(Routes.Memory) },
+                    onFailureLogs = { nav.navigate(Routes.FailureLogs) },
+                    onPinChanged = { nav.navigate(Routes.Admin) { popUpTo(Routes.Admin) { inclusive = true } } },
+                    onLoggedOut = { nav.navigate(Routes.Home) { popUpTo(Routes.Home) { inclusive = true } } },
+                    onBack = { nav.popBackStack() },
+                )
+            }
+        }
+        composable<Routes.ApiKeys> { ApiKeysScreen(onBack = { nav.popBackStack() }) }
+        composable<Routes.Models> { ModelsScreen(onBack = { nav.popBackStack() }) }
     }
 }
