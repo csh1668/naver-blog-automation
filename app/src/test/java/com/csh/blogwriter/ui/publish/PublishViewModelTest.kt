@@ -85,7 +85,8 @@ class PublishViewModelTest {
         override fun setDocument(documentJson: String) { calls += "inject" }
     }
 
-    private fun vm() = PublishViewModel(SavedStateHandle(mapOf("jobId" to "job1")), pendingRepo, historyRepo, failureRepo, settings, preparer, DocumentModelConverter())
+    private fun vm(imagePreparer: ImagePreparing = preparer) =
+        PublishViewModel(SavedStateHandle(mapOf("jobId" to "job1")), pendingRepo, historyRepo, failureRepo, settings, imagePreparer, DocumentModelConverter())
 
     @Before fun setUp() { Dispatchers.setMain(dispatcher) }
     @After fun tearDown() { Dispatchers.resetMain() }
@@ -118,6 +119,31 @@ class PublishViewModelTest {
     fun savesPreparedPathsRightAfterPreparing() = runTest {
         val vm = vm(); vm.attach(FakeController()); runCurrent()
         assertEquals(listOf(File("/tmp/img.jpg").absolutePath), pending.value!!.preparedPaths)
+    }
+
+    /** 이어서 올릴 때는 이미 준비해 둔 파일을 다시 쓰고, 사진을 다시 만들지 않는다. */
+    @Test
+    fun reusesPreparedPathsWithoutPreparingAgain() = runTest {
+        val prepared = listOf(PreparedImage("img_001", File("/tmp/prepared.jpg"), 800, 600))
+        val reusing = object : ImagePreparing {
+            val calls = mutableListOf<String>()
+            override suspend fun prepare(jobId: String, uris: List<String>, onProgress: (Int) -> Unit): List<PreparedImage> {
+                calls += "prepare"; return emptyList()
+            }
+            override fun load(jobId: String, paths: List<String>): List<PreparedImage>? {
+                calls += "load"; return prepared
+            }
+            override fun clear(jobId: String) {}
+        }
+        pending.value = job.copy(preparedPaths = listOf("/tmp/prepared.jpg"))
+
+        val vm = vm(reusing); val c = FakeController()
+        vm.attach(c); runCurrent()
+
+        assertEquals(listOf("load"), reusing.calls)
+        assertEquals(listOf("images:1", "load:myblog"), c.calls)
+        assertEquals(PublishState.LoadingEditor, vm.uiState.value.state)
+        assertEquals(listOf(File("/tmp/prepared.jpg").absolutePath), pending.value!!.preparedPaths)
     }
 
     @Test

@@ -28,7 +28,7 @@ class PublishStateMachineTest {
             PublishEvent.PopupsDismissed,
             PublishEvent.ImageUploaded("img_001"), PublishEvent.ImageUploaded("img_002"),
             PublishEvent.Injected(4),
-            PublishEvent.UrlChanged(publishedUrl, writeUrl),
+            PublishEvent.UrlChanged(publishedUrl),
         )
         assertEquals(PublishState.PreparingImages(0, 2), t[0].state)
         assertEquals(listOf(PublishEffect.PrepareImages), t[0].effects)
@@ -62,7 +62,7 @@ class PublishStateMachineTest {
 
     @Test
     fun loginRedirectBecomesSessionExpiredAndSavesPending() {
-        val t = machine().run(PublishEvent.Start, PublishEvent.ImagesPrepared, PublishEvent.UrlChanged(loginUrl, null))
+        val t = machine().run(PublishEvent.Start, PublishEvent.ImagesPrepared, PublishEvent.UrlChanged(loginUrl))
         assertEquals(PublishState.SessionExpired, t.last().state)
         assertEquals(listOf(PublishEffect.SavePending), t.last().effects)
     }
@@ -87,12 +87,23 @@ class PublishStateMachineTest {
     }
 
     @Test
-    fun wrongComponentCountFailsInjectStage() {
+    fun tooFewComponentsFailsInjectStage() {
         val t = machine(images = 0, components = 3).run(
             PublishEvent.Start, PublishEvent.ImagesPrepared, PublishEvent.PageLoaded("u"), PublishEvent.EditorReady,
             PublishEvent.PopupsDismissed, PublishEvent.Injected(1),
         )
         assertEquals(PublishStage.INJECT, (t.last().state as PublishState.Failed).stage)
+    }
+
+    /** 에디터가 컴포넌트를 더 만들어 두는 경우가 있어, 기대보다 많으면 그대로 검토로 넘어간다. */
+    @Test
+    fun moreComponentsThanExpectedProceedsToReviewing() {
+        val t = machine(images = 0, components = 3).run(
+            PublishEvent.Start, PublishEvent.ImagesPrepared, PublishEvent.PageLoaded("u"), PublishEvent.EditorReady,
+            PublishEvent.PopupsDismissed, PublishEvent.Injected(5),
+        )
+        assertEquals(PublishState.Reviewing, t.last().state)
+        assertEquals(listOf(PublishEffect.ShowEditor), t.last().effects)
     }
 
     @Test
@@ -103,33 +114,62 @@ class PublishStateMachineTest {
             PublishEvent.PopupsDismissed, PublishEvent.Injected(2),
         ).last().state
         assertEquals(PublishState.Reviewing, reviewing)
-        assertEquals(PublishState.Reviewing, m.reduce(reviewing, PublishEvent.UrlChanged(writeUrl, writeUrl)).state)
-        // 로그인 이동은 직전 주소와 무관하게 세션 만료다.
-        assertEquals(PublishState.SessionExpired, m.reduce(reviewing, PublishEvent.UrlChanged(loginUrl, null)).state)
-        assertEquals(PublishState.SessionExpired, m.reduce(reviewing, PublishEvent.UrlChanged(loginUrl, permalink)).state)
+        assertEquals(PublishState.Reviewing, m.reduce(reviewing, PublishEvent.UrlChanged(writeUrl)).state)
+        // 로그인 이동은 어떤 상태에서든 세션 만료다.
+        assertEquals(PublishState.SessionExpired, m.reduce(reviewing, PublishEvent.UrlChanged(loginUrl)).state)
     }
 
-    /** 글쓰기 페이지에서 나온 이동이 아니면 남의 글이든 옛 글이든 발행으로 보지 않는다. */
+    /** 글쓰기 화면을 거친 작업에서만 내 글 주소를 발행으로 인정한다. 중간에 다른 주소를 거쳐도 유지된다. */
     @Test
-    fun reviewingOnlyAcceptsOwnPostReachedFromTheWritePage() {
+    fun reviewingAcceptsOwnPostOnceWritePageWasSeen() {
         val m = machine(images = 0, components = 2)
-        val reviewing = PublishState.Reviewing
+        val reviewing = m.run(
+            PublishEvent.Start, PublishEvent.ImagesPrepared, PublishEvent.PageLoaded(writeUrl), PublishEvent.EditorReady,
+            PublishEvent.PopupsDismissed, PublishEvent.Injected(2),
+        ).last().state
+        assertEquals(PublishState.Reviewing, reviewing)
 
-        // (a) 다른 사용자의 글 주소 — 글쓰기 페이지에서 나왔더라도 무시
-        assertEquals(reviewing, m.reduce(reviewing, PublishEvent.UrlChanged("https://blog.naver.com/someoneelse/224000000001", writeUrl)).state)
+        // 사이에 관계없는 주소를 한 번 거쳐도 글쓰기 화면을 봤다는 사실은 남는다.
+        assertEquals(reviewing, m.reduce(reviewing, PublishEvent.UrlChanged("https://blog.naver.com/PostList.naver?blogId=myblog")).state)
 
-        // (b) 내 글 주소지만 직전 주소가 다른 글 주소 — 단순 이동이므로 무시
-        assertEquals(reviewing, m.reduce(reviewing, PublishEvent.UrlChanged(permalink, "https://blog.naver.com/myblog/111111111")).state)
-        assertEquals(reviewing, m.reduce(reviewing, PublishEvent.UrlChanged(permalink, null)).state)
-
-        // (c) 내 글 주소 + 직전이 글쓰기 페이지 → 발행
-        val published = m.reduce(reviewing, PublishEvent.UrlChanged(permalink, writeUrl))
+        val published = m.reduce(reviewing, PublishEvent.UrlChanged(permalink))
         assertEquals(PublishState.Published("224000000001", permalink), published.state)
         assertEquals(listOf(PublishEffect.SavePublished("224000000001", permalink)), published.effects)
+    }
 
-        // (d) isAfterWrite 형태 + PostWriteForm 에서 나온 이동 → 발행
-        val fromForm = m.reduce(reviewing, PublishEvent.UrlChanged(publishedUrl, "https://blog.naver.com/PostWriteForm.naver?blogId=myblog&Redirect=Write"))
-        assertEquals(PublishState.Published("224000000001", permalink), fromForm.state)
+    /** 글쓰기 화면을 한 번도 보지 못했으면 내 글 주소라도 발행으로 보지 않는다. */
+    @Test
+    fun reviewingIgnoresOwnPostWhenWritePageWasNeverSeen() {
+        val m = machine(images = 0, components = 2)
+        val reviewing = m.run(
+            PublishEvent.Start, PublishEvent.ImagesPrepared, PublishEvent.PageLoaded("https://blog.naver.com/myblog"),
+            PublishEvent.EditorReady, PublishEvent.PopupsDismissed, PublishEvent.Injected(2),
+        ).last().state
+        assertEquals(PublishState.Reviewing, reviewing)
+        assertEquals(reviewing, m.reduce(reviewing, PublishEvent.UrlChanged(permalink)).state)
+    }
+
+    /** 남의 글 주소는 글쓰기 화면을 거쳤더라도 무시한다. */
+    @Test
+    fun reviewingIgnoresOtherUsersPost() {
+        val m = machine(images = 0, components = 2)
+        val reviewing = m.run(
+            PublishEvent.Start, PublishEvent.ImagesPrepared, PublishEvent.PageLoaded(writeUrl), PublishEvent.EditorReady,
+            PublishEvent.PopupsDismissed, PublishEvent.Injected(2),
+        ).last().state
+        assertEquals(reviewing, m.reduce(reviewing, PublishEvent.UrlChanged("https://blog.naver.com/someoneelse/224000000001")).state)
+    }
+
+    /** 다시 시도하면 "글쓰기 화면을 봤다"는 기록도 초기화된다. */
+    @Test
+    fun writePageFlagResetsOnRetry() {
+        val m = machine(images = 0, components = 2)
+        m.run(
+            PublishEvent.Start, PublishEvent.ImagesPrepared, PublishEvent.PageLoaded(writeUrl), PublishEvent.EditorReady,
+            PublishEvent.PopupsDismissed, PublishEvent.Injected(2),
+        )
+        m.reduce(PublishState.Failed(PublishStage.INJECT, "x"), PublishEvent.Retry)
+        assertEquals(PublishState.Reviewing, m.reduce(PublishState.Reviewing, PublishEvent.UrlChanged(permalink)).state)
     }
 
     @Test
@@ -143,15 +183,20 @@ class PublishStateMachineTest {
         assertEquals("boom", failed.message)
         assertEquals(listOf(PublishEffect.LogFailure(PublishStage.DISMISS_POPUPS, "boom")), t.last().effects)
 
-        // JsError from Reviewing is NOT ignored
+    }
+
+    /** 검토 중에는 사용자가 에디터를 직접 다루므로 JS 오류가 나도 성공한 흐름을 실패로 바꾸지 않는다. */
+    @Test
+    fun jsErrorWhileReviewingIsIgnored() {
         val m = machine(images = 0, components = 2)
         val reviewing = m.run(
-            PublishEvent.Start, PublishEvent.ImagesPrepared, PublishEvent.PageLoaded("u"), PublishEvent.EditorReady,
+            PublishEvent.Start, PublishEvent.ImagesPrepared, PublishEvent.PageLoaded(writeUrl), PublishEvent.EditorReady,
             PublishEvent.PopupsDismissed, PublishEvent.Injected(2),
         ).last().state
         assertEquals(PublishState.Reviewing, reviewing)
-        val failedFromReview = m.reduce(reviewing, PublishEvent.JsError(PublishStage.INJECT, "error")).state as PublishState.Failed
-        assertEquals(PublishStage.INJECT, failedFromReview.stage)
+        val t = m.reduce(reviewing, PublishEvent.JsError(PublishStage.INJECT, "error"))
+        assertEquals(PublishState.Reviewing, t.state)
+        assertEquals(emptyList<PublishEffect>(), t.effects)
     }
 
     @Test
@@ -168,7 +213,7 @@ class PublishStateMachineTest {
         val failed = PublishState.Failed(PublishStage.UPLOAD, "x")
         assertEquals(Transition(failed, emptyList()), m.reduce(failed, PublishEvent.EditorReady))
         val published = PublishState.Published("1", "u")
-        assertEquals(Transition(published, emptyList()), m.reduce(published, PublishEvent.UrlChanged(loginUrl, writeUrl)))
+        assertEquals(Transition(published, emptyList()), m.reduce(published, PublishEvent.UrlChanged(loginUrl)))
         // Retry on Published is ignored
         assertEquals(Transition(published, emptyList()), m.reduce(published, PublishEvent.Retry))
     }

@@ -1,5 +1,6 @@
 package com.csh.blogwriter.ui.publish
 
+import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -28,7 +29,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import javax.inject.Inject
 
-data class PublishUiState(val state: PublishState = PublishState.Idle, val title: String = "", val lastUrl: String = "")
+data class PublishUiState(val state: PublishState = PublishState.Idle, val title: String = "")
 
 sealed interface PublishNav {
     data class SessionExpired(val jobId: String) : PublishNav
@@ -51,6 +52,7 @@ class PublishViewModel @Inject constructor(
 ) : ViewModel() {
 
     companion object {
+        private const val TAG = "PublishViewModel"
         const val EDITOR_READY_TIMEOUT_MS = 30_000L
         const val READY_POLL_MS = 500L
         const val POPUP_TIMEOUT_MS = 5_000L
@@ -70,6 +72,9 @@ class PublishViewModel @Inject constructor(
     private var blogId: String? = null
     private var images: List<PreparedImage> = emptyList()
     private val uploaded = mutableMapOf<String, UploadedImage>()
+    private var expectedComponents: Int? = null
+    /** 실패 로그에만 쓰는 진단용 마지막 주소 (발행 판정은 상태 기계가 URL 이벤트로 한다). */
+    private var lastPageUrl: String = ""
     private var timeoutJob: Job? = null
     private var pollJob: Job? = null
     private var started = false
@@ -85,7 +90,7 @@ class PublishViewModel @Inject constructor(
         blogId = settings.blogIdOnce()
         if (blogId == null) {
             machine = PublishStateMachine(0, 0, "")
-            dispatch(PublishEvent.UrlChanged("https://nid.naver.com/nidlogin.login", null))
+            dispatch(PublishEvent.UrlChanged("https://nid.naver.com/nidlogin.login"))
             return
         }
         val loaded = pendingJobs.get(jobId) ?: run {
@@ -93,9 +98,11 @@ class PublishViewModel @Inject constructor(
             dispatch(PublishEvent.JsError(PublishStage.PREPARE, "작업을 찾을 수 없음: $jobId")); return
         }
         job = loaded
+        val expected = DocumentModelConverter.expectedComponentCount(loaded.content)
+        expectedComponents = expected
         machine = PublishStateMachine(
             totalImages = loaded.content.imageRefs().size,
-            expectedComponents = DocumentModelConverter.expectedComponentCount(loaded.content),
+            expectedComponents = expected,
             blogId = blogId ?: "",
         )
         _uiState.update { it.copy(title = loaded.content.title) }
@@ -104,11 +111,10 @@ class PublishViewModel @Inject constructor(
 
     // ---- WebView 콜백 (NaverEditorWebView.Listener 가 위임) ----
     fun onUrlChanged(url: String) {
-        val previous = _uiState.value.lastUrl.takeIf { it.isNotEmpty() }
-        _uiState.update { it.copy(lastUrl = url) }
-        dispatch(PublishEvent.UrlChanged(url, previous))
+        lastPageUrl = url
+        dispatch(PublishEvent.UrlChanged(url))
     }
-    fun onPageFinished(url: String) { dispatch(PublishEvent.PageLoaded(url)) }
+    fun onPageFinished(url: String) { lastPageUrl = url; dispatch(PublishEvent.PageLoaded(url)) }
     fun onReady() { pollJob?.cancel(); dispatch(PublishEvent.EditorReady) }
     fun onPopupsDismissed(count: Int) { dispatch(PublishEvent.PopupsDismissed) }
     fun onImageUploaded(ref: String, response: JsonObject) {
@@ -117,9 +123,21 @@ class PublishViewModel @Inject constructor(
             .onFailure { dispatch(PublishEvent.ImageFailed(ref, "응답 해석 실패: ${it.message}")) }
     }
     fun onImageFailed(ref: String, message: String) = dispatch(PublishEvent.ImageFailed(ref, message))
-    fun onInjected(componentCount: Int) = dispatch(PublishEvent.Injected(componentCount))
+    fun onInjected(componentCount: Int) {
+        val expected = expectedComponents
+        if (expected != null && componentCount != expected) {
+            Log.w(TAG, "component count mismatch: expected=$expected actual=$componentCount")
+        }
+        dispatch(PublishEvent.Injected(componentCount))
+    }
     fun onJsError(step: String, message: String) {
-        val stage = when (step) { "ready" -> PublishStage.LOAD_EDITOR; "popups" -> PublishStage.DISMISS_POPUPS; "upload" -> PublishStage.UPLOAD; else -> PublishStage.INJECT }
+        val stage = when (step) {
+            "ready", "fit" -> PublishStage.LOAD_EDITOR
+            "popups" -> PublishStage.DISMISS_POPUPS
+            "upload" -> PublishStage.UPLOAD
+            else -> PublishStage.INJECT
+        }
+        Log.w(TAG, "js error at $step: $message")
         dispatch(PublishEvent.JsError(stage, message))
     }
     fun onRetry() { uploaded.clear(); dispatch(PublishEvent.Retry) }
@@ -160,7 +178,7 @@ class PublishViewModel @Inject constructor(
             }
             PublishEffect.SavePending -> viewModelScope.launch { _navigation.emit(PublishNav.SessionExpired(jobId)) }
             is PublishEffect.LogFailure -> viewModelScope.launch {
-                failures.add(effect.stage.name, effect.message, "url=${_uiState.value.lastUrl}")
+                failures.add(effect.stage.name, effect.message, "url=$lastPageUrl")
                 pendingJobs.setLastFailure(jobId, "${effect.stage.name}: ${effect.message}")
                 _navigation.emit(PublishNav.Failed(jobId))
             }
