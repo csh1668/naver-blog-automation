@@ -22,7 +22,7 @@
 
 | 영역 | 선택 | 비고 |
 |---|---|---|
-| LLM 호출 | OkHttp + kotlinx-serialization으로 Gemini REST `generateContent` 직접 호출 (스트리밍은 `streamGenerateContent`, 계획 카드 표시는 완료 후) | 공식 SDK 미사용 (SP1 결정 유지). 모델 ID는 설정값이며 구현 시점의 공식 목록으로 확정 |
+| LLM 호출 | OkHttp + kotlinx-serialization으로 Gemini REST 직접 호출. **항상 `streamGenerateContent?alt=sse` 로 스트리밍**(사용자 결정): `say` 는 부분 JSON에서 점진 추출해 말풍선에 타이핑되듯 표시, `plan`/`post` 는 완료 후 렌더링, 도구 호출 청크는 누적 후 실행 | 공식 SDK 미사용 (SP1 결정 유지). 새 Interactions API 대신 무상태 generateContent 계열을 쓴다(로컬 영속이 필요하고 문서가 완전함) |
 | 구조화 출력 | `responseMimeType: application/json` + `responseSchema` | 대화 턴 응답과 `PostContent`를 스키마로 강제 |
 | 도구 호출 | Gemini function calling (`tools`) | `web_search`, `open_page`, `remember` 3개 |
 | 키 보관 | Android Keystore AES-GCM 키로 암호화한 JSON을 DataStore에 저장 | FR-2.2 |
