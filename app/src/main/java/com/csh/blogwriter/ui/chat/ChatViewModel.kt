@@ -40,6 +40,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
@@ -165,13 +167,16 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /** 사진 첨부와 보내기가 거의 동시에 들어와도 대화는 하나만 만들도록 직렬화한다. */
+    private val sessionLock = Mutex()
+
     /** 지금 열려 있는 대화. 없으면(= "새 글") 여기서 만든다 — 첫 메시지·첫 사진 때만 생긴다. */
-    private suspend fun ensureSession(): ChatSession {
-        _uiState.value.session?.let { return it }
+    private suspend fun ensureSession(): ChatSession = sessionLock.withLock {
+        _uiState.value.session?.let { return@withLock it }
         val session = chatRepo.createSession()
         _uiState.update { it.copy(session = session) }
         observeMessages(session.id)
-        return session
+        session
     }
 
     private fun observeMessages(sessionId: String) {
