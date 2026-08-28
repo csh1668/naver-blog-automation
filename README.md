@@ -15,3 +15,6 @@
 4. 태블릿에서 Release 페이지의 APK 를 내려받아 설치 (출처를 알 수 없는 앱 허용 필요)
 
 로컬 서명 빌드: 루트에 `keystore.properties` (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`) 를 두고 `./gradlew :app:assembleRelease`.
+
+## 업데이트
+앱이 시작할 때 새 버전을 확인하고, 새 버전이 있으면 홈 화면 상단에 안내 배너를 보여 준다. 배너를 누르면 릴리스 페이지 맨 위 링크로 APK 를 내려받을 수 있다.

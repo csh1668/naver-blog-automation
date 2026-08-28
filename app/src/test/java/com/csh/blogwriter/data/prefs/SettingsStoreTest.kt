@@ -28,4 +28,22 @@ class SettingsStoreTest {
         s.setBlogId(null)
         assertNull(s.blogId.first())
     }
+
+    @Test
+    fun lastUpdateCheckAtDefaultsToZeroAndRoundTrips() = runTest {
+        val s = store()
+        assertEquals(0L, s.lastUpdateCheckAtOnce())
+        s.setLastUpdateCheckAt(123L)
+        assertEquals(123L, s.lastUpdateCheckAtOnce())
+    }
+
+    @Test
+    fun dismissedUpdateTagRoundTrip() = runTest {
+        val s = store()
+        assertNull(s.dismissedUpdateTagOnce())
+        s.setDismissedUpdateTag("v1.2.3")
+        assertEquals("v1.2.3", s.dismissedUpdateTagOnce())
+        s.setDismissedUpdateTag(null)
+        assertNull(s.dismissedUpdateTagOnce())
+    }
 }
