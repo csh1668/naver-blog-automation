@@ -4,7 +4,7 @@
 - 근거: `요구사항.md` v0.1 + §5 변경 이력(1차·2차), `docs/design-guide.md` §8, SP1 스펙(`2026-08-28-publish-pipeline-design.md`)
 - 범위: FR-2 (API 키 관리·PIN·키 로테이션·모델 다운그레이드), FR-4 (채팅 안에서의 사진·줄거리·음성 입력, 자동 임시 저장), FR-5 (글 생성), FR-6 (검토·부분 수정), FR-10.2 (초안 = 대화 세션), **FR-11 (개인화: 메모리, 자료 검색 툴, 고품질 프롬프트)**
 - 범위 밖 (SP3): FR-3 (블로그에서 스타일 프로필 추출), FR-9 (진단), FR-1.4 본격 알림. 단, 메모리 저장소는 SP3의 스타일 프로필이 들어갈 자리를 미리 마련한다.
-- 상태: **사용자 1차 검토 반영(2026-08-28)** — 키 접두 검사 제거, 도구 진행 표시, 화자 40대 여성, 3단 채팅 화면, 네이버 우선 검색, 메모리 자동 저장, 프롬프트 편집 가능, 글 길이 기본값 유지.
+- 상태: **구현 완료(2026-08-28)** — 차이점: §14 참고.
 
 ## 1. 목표
 
@@ -206,3 +206,16 @@ onResult(key, model, outcome):
 - `TestComposeScreen` 제거, `Routes.TestCompose` → `Routes.Chat(sessionId)`.
 - Room 버전 2 마이그레이션(테이블 추가만).
 - `SettingsStore`에 PIN 해시·모델 설정·검색 툴 토글 추가.
+
+## 14. 구현 차이점
+
+실제 구현(`sp2-chat` 브랜치, Task 1~13)이 이 스펙과 다른 점.
+
+- **대화 기록 레일 폭**: §9는 폭을 명시하지 않았는데, 구현은 펼친 상태 280dp / 접은 아이콘 레일 72dp(`SessionRailWidth`, `SessionListPane.kt`)로 고정.
+- **패널을 접어도 살려 둔다**: §9는 "패널이 열리면 대화 기록은 자동으로 최소화된다"까지만 서술. 구현은 한 번 연 패널을 접어도 컴포지션에서 내리지 않고 폭만 0으로 줄인다(`ChatScreen.kt`의 `panelMounted`) — 안에 있는 `PublishPanel`의 WebView·편집 상태가 다시 만들어지지 않게 하려는 것. 접힌 동안은 채팅 상단에 진행 상태 배너(예: "초안을 넣고 있어요 — 열기")를 보여 준다.
+- **`open_page` 제한이 스펙보다 좁다**: §7은 "턴당 2회, http(s)만"이라고만 적었지만, 구현(`DefaultToolExecutor.kt`)은 같은 턴의 `web_search`가 돌려준 URL만 `open_page`로 열 수 있도록 화이트리스트(`allowedUrls`)를 둔다. 임의 URL은 `{"error":"not_allowed"}`.
+- **검색 도구 토글 위치**: §9의 관리자 화면 목록엔 "검색 도구 토글"이 모델 화면과 나란히만 적혀 있는데, 실제로는 `SettingsScreen`(최상위 설정 목록)에 "자료 검색 도구" 스위치로 있고 `ModelsScreen`("모델과 글 길이")과는 별도 화면이다.
+- **PIN 변경은 별도 진입 경로**: §4.4는 PIN 설정·검증만 서술했지만, 구현은 설정 화면의 "PIN 변경" 항목이 `PinGateScreen(forceSet = true)`로 진입해 기존 PIN 확인 없이 바로 새 PIN을 두 번 입력하게 한다(확인 시점에만 덮어씀).
+- **키 검증 상태 값**: §4.1의 "유효/무효/한도/네트워크 오류" 서술은 구현에서 `KeyProbe`/`Candidate.Status` = `PENDING/VALID/INVALID/LIMITED/ERROR`로 나타난다. `VALID`와 `LIMITED`(429) 모두 유효한 키로 간주해 저장한다(`GeminiClient.listModels`, `ApiKeysViewModel`).
+- **메모리 추출은 발행 완료 후 백그라운드**: §8/`MemoryExtractor` 설계대로, 발행이 끝나면 `ChatViewModel.onPublished`가 앱 스코프에서 `MemoryExtractor`를 실행해 대화 전체에서 최대 3개 항목을 뽑아 즉시 저장하고, 채팅에 "이런 점을 기억해 둘게요: …" SYSTEM 메시지를 남긴다. 화면을 벗어나도 끊기지 않으며, 실패해도 사용자에게 알리지 않는다.
+- **발행 버튼은 앱이 절대 누르지 않는다**: §6/§13대로 구현되어 있으며, `ChatViewModel`에도 "발행 버튼은 사용자가 직접 누른다"는 주석으로 명시. 앱은 초안을 에디터에 채워 넣는 데까지만 관여한다.
