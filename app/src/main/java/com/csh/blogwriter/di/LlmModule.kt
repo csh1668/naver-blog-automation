@@ -3,7 +3,6 @@ package com.csh.blogwriter.di
 import com.csh.blogwriter.chat.CachedPhotoAttachments
 import com.csh.blogwriter.chat.ConversationEngine
 import com.csh.blogwriter.chat.DefaultToolExecutor
-import com.csh.blogwriter.chat.NoOpPublishedHook
 import com.csh.blogwriter.chat.PhotoAttachments
 import com.csh.blogwriter.chat.PromptBuilder
 import com.csh.blogwriter.chat.PublishedHook
@@ -17,6 +16,7 @@ import com.csh.blogwriter.llm.GeminiClient
 import com.csh.blogwriter.llm.GeminiHttp
 import com.csh.blogwriter.llm.KeyRotator
 import com.csh.blogwriter.llm.SecretCipher
+import com.csh.blogwriter.memory.MemoryExtractor
 import com.csh.blogwriter.research.ResearchTool
 import com.csh.blogwriter.research.WebResearchTool
 import dagger.Binds
@@ -24,6 +24,9 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import okhttp3.OkHttpClient
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -40,13 +43,16 @@ abstract class LlmModule {
 
     @Binds @Singleton abstract fun photoAttachments(impl: CachedPhotoAttachments): PhotoAttachments
 
-    /** 발행 뒤 메모리 추출(SP2 Task 12)이 여기에 붙는다. */
-    @Binds @Singleton abstract fun publishedHook(impl: NoOpPublishedHook): PublishedHook
+    /** 발행 뒤 대화에서 기억할 점을 뽑는다(SP2 Task 12). */
+    @Binds @Singleton abstract fun publishedHook(impl: MemoryExtractor): PublishedHook
 
     companion object {
         @Provides @Singleton fun secretCipher(): SecretCipher = AndroidKeystoreCipher()
 
         @Provides @Singleton fun geminiClient(http: OkHttpClient): GeminiClient = GeminiClient(GeminiHttp.configure(http))
+
+        /** [MemoryExtractor] 가 발행 뒤 추출 작업을 화면 스코프와 별개로 돌리는 데 쓴다. */
+        @Provides @Singleton fun appScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
         @Provides @Singleton fun conversationEngine(
             client: GeminiClient,

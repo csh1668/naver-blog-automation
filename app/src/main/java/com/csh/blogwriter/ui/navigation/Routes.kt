@@ -6,7 +6,6 @@ object Routes {
     @Serializable data object Home
     /** returnTo: 로그인 후 돌아갈 곳. null 이면 Home. 값은 "publish:{jobId}" 또는 "compose". */
     @Serializable data class Login(val returnTo: String? = null)
-    @Serializable data object TestCompose
     /** sessionId 가 null 이면 새 대화를 시작한다. */
     @Serializable data class Chat(val sessionId: String? = null)
     @Serializable data class Publish(val jobId: String)

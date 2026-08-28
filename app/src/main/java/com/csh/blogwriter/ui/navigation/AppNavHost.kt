@@ -14,7 +14,6 @@ import com.csh.blogwriter.ui.admin.PinGateScreen
 import com.csh.blogwriter.ui.admin.PromptsScreen
 import com.csh.blogwriter.ui.admin.SettingsScreen
 import com.csh.blogwriter.ui.chat.ChatScreen
-import com.csh.blogwriter.ui.compose.TestComposeScreen
 import com.csh.blogwriter.ui.fallback.FallbackScreen
 import com.csh.blogwriter.ui.history.HistoryScreen
 import com.csh.blogwriter.ui.home.HomeScreen
@@ -32,6 +31,7 @@ fun AppNavHost() {
             HomeScreen(
                 onNewPost = { nav.navigate(Routes.Chat()) },
                 onLogin = { returnTo -> nav.navigate(Routes.Login(returnTo)) },
+                onOpenSession = { sessionId -> nav.navigate(Routes.Chat(sessionId)) },
                 onResumePending = { jobId -> nav.navigate(Routes.Publish(jobId)) },
                 onHistory = { nav.navigate(Routes.History) },
                 onAdmin = { nav.navigate(Routes.Admin) },
@@ -48,12 +48,6 @@ fun AppNavHost() {
                         returnTo?.startsWith("publish:") == true -> nav.navigate(Routes.Publish(returnTo.removePrefix("publish:")))
                     }
                 },
-            )
-        }
-        composable<Routes.TestCompose> {
-            TestComposeScreen(
-                onBack = { nav.popBackStack() },
-                onPublish = { id -> nav.navigate(Routes.Publish(id)) { popUpTo(Routes.Home) } },
             )
         }
         composable<Routes.Chat> { entry ->
