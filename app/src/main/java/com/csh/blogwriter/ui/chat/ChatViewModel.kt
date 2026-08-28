@@ -295,17 +295,27 @@ class ChatViewModel @Inject constructor(
 
     private suspend fun onSuccess(sessionId: String, response: TurnResponse) {
         val session = sessionOf(sessionId) ?: return
-        readyToDraft = response.readyToDraft
+        // post 는 사용자가 초안을 요청한 턴, 또는 이미 초안이 있어 고치는 턴에서만 받는다.
+        // 모델이 계획 단계에서 성급하게 post 를 내면 버리고, 대신 "초안 써 줘" 칩만 띄운다.
+        val hasDraft = session.pendingJobId != null
+        val post = response.post?.takeIf { lastDraftTurn || hasDraft }
+        readyToDraft = response.readyToDraft || (response.post != null && post == null)
         chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.TEXT, ChatPayloads.text(response.say))
         // 실제 말풍선이 생긴 뒤에 임시 말풍선을 지운다 — 중간에 빈 화면이 보이지 않게.
         _uiState.update { it.copy(streamingSay = null) }
         response.plan?.let { chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.PLAN, ChatPayloads.plan(it)) }
-        response.post?.let { chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.POST, ChatPayloads.post(it)) }
-        val chips = if (response.readyToDraft) (response.quickReplies + DRAFT_CHIP).distinct() else response.quickReplies
+        post?.let { chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.POST, ChatPayloads.post(it)) }
+        // 초안이 이미 있으면(이번 턴에 만들었든 전에 만들었든) "이대로 초안 써 줘" 칩은 더 이상 의미가 없다.
+        val draftExists = hasDraft || post != null
+        val chips = when {
+            draftExists -> response.quickReplies.filterNot { it == DRAFT_CHIP }
+            readyToDraft -> (response.quickReplies + DRAFT_CHIP).distinct()
+            else -> response.quickReplies
+        }
         _uiState.update { it.copy(quickReplies = chips) }
-        val title = response.post?.title ?: session.title ?: response.plan?.titleCandidates?.firstOrNull()
+        val title = post?.title ?: session.title ?: response.plan?.titleCandidates?.firstOrNull()
         if (title != session.title) updateSession(session.copy(title = title))
-        response.post?.let { onPostRevised(sessionId, it) }
+        post?.let { onPostRevised(sessionId, it) }
     }
 
     /** 엔진이 post 를 낸 턴의 공통 처리: 발행 작업을 만들거나 갱신하고 패널을 연다. */
@@ -314,6 +324,11 @@ class ChatViewModel @Inject constructor(
         val jobId = session.pendingJobId ?: UUID.randomUUID().toString()
         val alreadyOpened = _uiState.value.panelJobId == jobId
         val existing = pendingJobs.get(jobId)
+        // 내용이 그대로면 에디터를 다시 채우지 않는다(같은 글이 다시 로딩되는 것처럼 보이던 문제).
+        if (alreadyOpened && existing?.content == post) {
+            _uiState.update { it.copy(panelOpen = true, listCollapsed = true) }
+            return
+        }
         pendingJobs.save(
             PendingJob(
                 id = jobId,

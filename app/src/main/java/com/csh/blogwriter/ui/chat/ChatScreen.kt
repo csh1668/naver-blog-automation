@@ -119,7 +119,8 @@ fun ChatScreen(
     BoxWithConstraints(Modifier.fillMaxSize().background(AppTheme.colors.background)) {
         val screenWidth = maxWidth
         val wide = screenWidth >= WIDE_MIN
-        val panelWidth = maxOf(PANEL_MIN, screenWidth / 2)
+        // 채팅 : 에디터 ≈ 3 : 7 (사용자 결정). 에디터는 최소 PANEL_MIN.
+        val panelWidth = maxOf(PANEL_MIN, screenWidth * 0.7f)
         val panelMountedNow = panelMounted && ui.panelJobId != null
         val shownPanelWidth by animateDpAsState(
             targetValue = if (ui.panelOpen) (if (wide) panelWidth else screenWidth) else 0.dp,

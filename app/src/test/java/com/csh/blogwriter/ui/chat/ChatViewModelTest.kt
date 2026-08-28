@@ -353,6 +353,40 @@ class ChatViewModelTest {
         collector.cancel()
     }
 
+    /** 계획 단계에서 모델이 성급하게 post 를 내면 버리고, 초안 칩만 띄운다(제목 고르자마자 에디터가 뜨던 문제). */
+    @Test
+    fun earlyPostOnPlanningTurnIsIgnoredButDraftChipIsOffered() = runTest {
+        turns += TurnResult.Success(TurnResponse("좋은 제목이에요", quickReplies = listOf("다른 제목"), post = post("성급한 초안")), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.send("1번 제목으로"); advanceUntilIdle()
+
+        assertFalse(contexts.single().draftTurn)
+        assertNull(vm.uiState.value.panelJobId)
+        assertFalse(vm.uiState.value.panelOpen)
+        assertTrue(pendingJobs.jobs.value.isEmpty())
+        assertTrue(vm.uiState.value.messages.none { it.kind == MessageKind.POST })
+        assertEquals(listOf("다른 제목", ChatViewModel.DRAFT_CHIP), vm.uiState.value.quickReplies)
+    }
+
+    /** 초안이 생긴 뒤에는 "이대로 초안 써 줘" 칩을 더 붙이지 않고, 같은 내용이면 에디터를 다시 채우지 않는다. */
+    @Test
+    fun draftChipDisappearsAfterDraftAndIdenticalPostDoesNotReinject() = runTest {
+        turns += TurnResult.Success(TurnResponse("초안이에요", readyToDraft = true, quickReplies = listOf(ChatViewModel.DRAFT_CHIP, "더 짧게"), post = post("제목")), emptyList(), "flash")
+        turns += TurnResult.Success(TurnResponse("같은 초안이에요", readyToDraft = true, post = post("제목")), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        val reinjects = mutableListOf<PostContent>()
+        val collector = launch { vm.reinject.collect { reinjects += it } }
+
+        vm.requestDraft(); advanceUntilIdle()
+        assertEquals(listOf("더 짧게"), vm.uiState.value.quickReplies)
+
+        vm.requestDraft(); advanceUntilIdle()
+        assertTrue(reinjects.isEmpty())
+        assertEquals(1, pendingJobs.jobs.value.size)
+        assertTrue(vm.uiState.value.panelOpen)
+        collector.cancel()
+    }
+
     /** 못 읽은 사진 자리를 비워 두면 다음 첨부에서 번호가 겹친다 — 붙일 때마다 전체를 다시 매긴다. */
     @Test
     fun refsStayContiguousWhenAnUnreadablePhotoIsDropped() = runTest {
