@@ -47,6 +47,9 @@ class PublishStateMachine(
                 else if (state.done + 1 >= state.total) inject()
                 else Transition(state.copy(done = state.done + 1), emptyList())
             is PublishEvent.ImageFailed -> fail(PublishStage.UPLOAD, "사진 업로드 실패 (${event.ref}): ${event.message}")
+            // 재주입은 사용자가 검토 중일 때만 의미가 있다 (업로드된 사진은 그대로 다시 쓴다).
+            is PublishEvent.Reinject ->
+                if (state is PublishState.Reviewing) inject() else Transition(state, emptyList())
             is PublishEvent.Injected ->
                 if (state !is PublishState.Injecting) Transition(state, emptyList())
                 // 에디터가 컴포넌트를 더 만들어 두는 경우가 있어 모자랄 때만 실패로 본다.

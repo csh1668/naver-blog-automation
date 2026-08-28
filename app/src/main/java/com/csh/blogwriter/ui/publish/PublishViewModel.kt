@@ -9,6 +9,7 @@ import com.csh.blogwriter.data.repo.FailureLogRepository
 import com.csh.blogwriter.data.repo.HistoryRepository
 import com.csh.blogwriter.data.repo.PendingJob
 import com.csh.blogwriter.data.repo.PendingJobRepository
+import com.csh.blogwriter.domain.model.PostContent
 import com.csh.blogwriter.domain.model.PreparedImage
 import com.csh.blogwriter.domain.publish.PublishEffect
 import com.csh.blogwriter.domain.publish.PublishEvent
@@ -78,13 +79,40 @@ class PublishViewModel @Inject constructor(
     private var timeoutJob: Job? = null
     private var pollJob: Job? = null
     private var started = false
+    /** WebView 가 없어진 뒤인지. 패널을 접었다 다시 펴면 새 WebView 라 처음부터 다시 해야 한다. */
+    private var detached = false
 
     fun attach(controller: EditorController) {
         this.controller = controller
-        if (!started) { started = true; viewModelScope.launch { start() } }
+        when {
+            !started -> { started = true; viewModelScope.launch { start() } }
+            // 이전 WebView 는 파괴돼 화면이 비어 있다 — 발행까지 끝난 게 아니라면 다시 채워 넣는다.
+            detached && _uiState.value.state !is PublishState.Published -> { uploaded.clear(); dispatch(PublishEvent.Retry) }
+        }
+        detached = false
     }
 
-    fun detach() { controller = null; pollJob?.cancel(); timeoutJob?.cancel() }
+    fun detach() { controller = null; detached = true; pollJob?.cancel(); timeoutJob?.cancel() }
+
+    /**
+     * 채팅에서 글이 수정됐을 때 검토 중인 에디터에 새 내용을 다시 넣는다.
+     * 사진은 이미 올라가 있는 것을 그대로 쓰므로 텍스트 변경만 반영된다.
+     */
+    fun reinject(content: PostContent) {
+        viewModelScope.launch {
+            val current = job ?: return@launch
+            val updated = current.copy(content = content)
+            job = updated
+            pendingJobs.save(updated)
+            val expected = DocumentModelConverter.expectedComponentCount(content)
+            expectedComponents = expected
+            // expectedComponents 는 생성자 값이라 기계를 새로 만든다.
+            machine = PublishStateMachine(images.size, expected, blogId ?: "")
+            // 새 기계는 "글쓰기 화면을 봤다"는 기록이 없어 그대로 두면 발행을 감지하지 못한다.
+            if (lastPageUrl.isNotEmpty()) dispatch(PublishEvent.UrlChanged(lastPageUrl))
+            dispatch(PublishEvent.Reinject(content))
+        }
+    }
 
     private suspend fun start() {
         blogId = settings.blogIdOnce()

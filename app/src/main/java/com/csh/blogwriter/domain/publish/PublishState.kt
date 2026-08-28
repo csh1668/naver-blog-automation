@@ -1,5 +1,7 @@
 package com.csh.blogwriter.domain.publish
 
+import com.csh.blogwriter.domain.model.PostContent
+
 enum class PublishStage { PREPARE, LOAD_EDITOR, DISMISS_POPUPS, UPLOAD, INJECT, REVIEW }
 
 sealed interface PublishState {
@@ -31,6 +33,8 @@ sealed interface PublishEvent {
     data class Timeout(val stage: PublishStage) : PublishEvent
     data class JsError(val stage: PublishStage, val message: String) : PublishEvent
     data object Retry : PublishEvent
+    /** 채팅에서 글이 수정됐다 — 검토 중인 에디터에 새 내용을 다시 넣는다. */
+    data class Reinject(val content: PostContent) : PublishEvent
 }
 
 sealed interface PublishEffect {
