@@ -86,7 +86,7 @@ onResult(key, model, outcome):
   성공 → 해당 키를 다음 시작점으로
 ```
 - 모델 목록(설정 가능). 2026-08-28 공식 문서 기준 기본값: primary `gemini-3.7-flash`, fallback `gemini-3.5-flash-lite` (모델 페이지: ai.google.dev/gemini-api/docs/models). 원복은 자동(모델 쿨다운 만료 시 primary부터 다시 시도).
-- **주의 (공식 문서)**: "Rate limits are applied per project, not per API key." — 같은 Google Cloud/AI Studio 프로젝트에서 만든 키 여러 개는 한도를 공유하므로 로테이션 효과가 없다. 관리자 화면의 키 등록 안내에 "키마다 다른 프로젝트에서 발급"을 명시하고, 검증 시 키의 프로젝트를 구분할 수 없으므로 429가 동시에 나면 "같은 프로젝트 키일 수 있어요"라고 알려 준다. 무료 티어 수치는 AI Studio의 Rate Limit 페이지에서 확인(문서에 표 없음).
+- **한도 (사용자 실측, 2026-08-28)**: `gemini-3.7-flash` RPM 5 / TPM 250k / RPD 20, `gemini-3.5-flash-lite` RPM 15 / TPM 250k / RPD 500. 한도는 프로젝트 단위이며, 사용자가 준비한 키 7개는 모두 서로 다른 계정·프로젝트에서 발급되었으므로 로테이션이 유효하다(하루 예산: 3.7-flash 140회, flash-lite 3,500회). 글 1편당 8~12회 호출을 가정하면 하루 2편에 약 5배 여유. `KeyRotator` 기본값: 429 시 키 쿨다운 60초(RPM), 같은 키가 하루 20회 성공 후에는 자정(태평양 시간 기준 리셋)까지 그 키를 마지막 순위로 내린다(RPD 선제 회피). 관리자 키 등록 안내에는 "키마다 다른 프로젝트에서 발급" 문구를 유지한다.
 
 ### 4.4 게이팅 (FR-2 보완)
 - `ApiKeyStore.hasUsableKey: Flow<Boolean>` (등록·비활성 아님·검증 성공 이력). false면 Home CTA 비활성 + InlineBanner "글을 쓰려면 관리자가 열쇠를 등록해야 해요" (기술 용어 회피). 채팅 화면에 직접 진입 시(초안 재개 등)도 같은 배너.
