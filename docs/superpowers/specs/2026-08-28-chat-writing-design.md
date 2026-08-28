@@ -123,6 +123,7 @@ onResult(key, model, outcome):
 - 사용자가 "초안 작성"(칩 또는 자유 입력)을 보내면 `PromptBuilder`가 "이번 턴은 `post`를 채운다"는 지시를 추가하고, 응답의 `post`를 `PostContentJson`으로 검증 → 이미지 ref가 첨부 목록과 일치하는지 검사 → `PendingJob` 생성 → 사이드 패널 열기.
 - 부분 수정: 패널이 열린 상태에서 사용자 메시지 → 프롬프트에 현재 `post` 전문 포함 + "수정된 전체 post를 다시 낸다" 지시 → 새 `post` → `PublishStateMachine`에 새 이벤트 `Reinject(content)`: `Reviewing`에서 `Injecting`으로 되돌아가 `setDocument` 재실행(이미지는 이미 업로드됨 → `uploaded` 맵 재사용, 새 사진이 추가됐으면 그 사진만 업로드).
 - 응답이 스키마를 어기면(파싱 실패) 같은 키로 1회 재요청(온도 0), 그래도 실패면 "다시 말해 주세요" 시스템 메시지.
+- **앱의 역할은 초안을 에디터에 채워 넣는 것까지다.** 발행은 사용자가 패널 안 에디터의 "발행" 버튼을 직접 누른다. 앱과 브리지 스크립트는 발행 버튼을 절대 자동으로 누르지 않으며, 발행 완료는 URL 변화로 감지만 한다(SP1 FR-7.5 유지).
 
 ## 7. 도구 (function calling)
 
