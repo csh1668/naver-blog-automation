@@ -27,7 +27,7 @@ sealed interface PublishEvent {
     data class ImageUploaded(val ref: String) : PublishEvent
     data class ImageFailed(val ref: String, val message: String) : PublishEvent
     data class Injected(val componentCount: Int) : PublishEvent
-    data class UrlChanged(val url: String) : PublishEvent
+    data class UrlChanged(val url: String, val previousUrl: String?) : PublishEvent
     data class Timeout(val stage: PublishStage) : PublishEvent
     data class JsError(val stage: PublishStage, val message: String) : PublishEvent
     data object Retry : PublishEvent

@@ -37,4 +37,26 @@ class PublishUrlParserTest {
         assertNull(PublishUrlParser.parsePublished("https://blog.naver.com/myblog?Redirect=Write&categoryNo=25"))
         assertNull(PublishUrlParser.parsePublished("not a url"))
     }
+
+    /** 블로그 홈은 글 주소가 아니다(경로 한 조각). */
+    @Test
+    fun ignoresBlogHome() {
+        assertNull(PublishUrlParser.parsePublished("https://blog.naver.com/myblog"))
+        assertNull(PublishUrlParser.parsePublished("https://blog.naver.com/myblog/"))
+    }
+
+    @Test
+    fun recognisesWritePage() {
+        assertTrue(PublishUrlParser.isWritePage("https://blog.naver.com/myblog?Redirect=Write&categoryNo=25"))
+        assertTrue(PublishUrlParser.isWritePage("https://blog.naver.com/PostWriteForm.naver?blogId=myblog&Redirect=Write"))
+    }
+
+    @Test
+    fun permalinkAndLoginAreNotWritePages() {
+        assertFalse(PublishUrlParser.isWritePage("https://blog.naver.com/myblog/224000000001"))
+        assertFalse(PublishUrlParser.isWritePage(published))
+        assertFalse(PublishUrlParser.isWritePage("https://nid.naver.com/nidlogin.login?mode=form"))
+        assertFalse(PublishUrlParser.isWritePage("https://blog.naver.com/myblog"))
+        assertFalse(PublishUrlParser.isWritePage("not a url"))
+    }
 }

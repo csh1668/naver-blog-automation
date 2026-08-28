@@ -84,25 +84,30 @@ class PublishViewModel @Inject constructor(
     private suspend fun start() {
         blogId = settings.blogIdOnce()
         if (blogId == null) {
-            machine = PublishStateMachine(0, 0)
-            dispatch(PublishEvent.UrlChanged("https://nid.naver.com/nidlogin.login"))
+            machine = PublishStateMachine(0, 0, "")
+            dispatch(PublishEvent.UrlChanged("https://nid.naver.com/nidlogin.login", null))
             return
         }
         val loaded = pendingJobs.get(jobId) ?: run {
-            machine = PublishStateMachine(0, 0)
+            machine = PublishStateMachine(0, 0, "")
             dispatch(PublishEvent.JsError(PublishStage.PREPARE, "작업을 찾을 수 없음: $jobId")); return
         }
         job = loaded
         machine = PublishStateMachine(
             totalImages = loaded.content.imageRefs().size,
             expectedComponents = DocumentModelConverter.expectedComponentCount(loaded.content),
+            blogId = blogId ?: "",
         )
         _uiState.update { it.copy(title = loaded.content.title) }
         dispatch(PublishEvent.Start)
     }
 
     // ---- WebView 콜백 (NaverEditorWebView.Listener 가 위임) ----
-    fun onUrlChanged(url: String) { _uiState.update { it.copy(lastUrl = url) }; dispatch(PublishEvent.UrlChanged(url)) }
+    fun onUrlChanged(url: String) {
+        val previous = _uiState.value.lastUrl.takeIf { it.isNotEmpty() }
+        _uiState.update { it.copy(lastUrl = url) }
+        dispatch(PublishEvent.UrlChanged(url, previous))
+    }
     fun onPageFinished(url: String) { dispatch(PublishEvent.PageLoaded(url)) }
     fun onReady() { pollJob?.cancel(); dispatch(PublishEvent.EditorReady) }
     fun onPopupsDismissed(count: Int) { dispatch(PublishEvent.PopupsDismissed) }

@@ -6,7 +6,11 @@ import com.csh.blogwriter.publish.PublishUrlParser
  * 발행 흐름의 순수 상태 전이. 부수효과는 [PublishEffect] 로 돌려주고 ViewModel 이 실행한다.
  * 어떤 상태에서든 로그인 페이지로의 이동은 SessionExpired, 타임아웃/JS 오류는 Failed.
  */
-class PublishStateMachine(private val totalImages: Int, private val expectedComponents: Int) {
+class PublishStateMachine(
+    private val totalImages: Int,
+    private val expectedComponents: Int,
+    private val blogId: String,
+) {
 
     fun reduce(state: PublishState, event: PublishEvent): Transition {
         if (state.isTerminal) {
@@ -14,7 +18,7 @@ class PublishStateMachine(private val totalImages: Int, private val expectedComp
         }
         return when (event) {
             is PublishEvent.Start, is PublishEvent.Retry -> start()
-            is PublishEvent.UrlChanged -> onUrl(state, event.url)
+            is PublishEvent.UrlChanged -> onUrl(state, event.url, event.previousUrl)
             is PublishEvent.PageLoaded ->
                 if (PublishUrlParser.isLoginPage(event.url)) expired()
                 else if (state is PublishState.LoadingEditor) Transition(state, listOf(PublishEffect.StartReadyPolling))
@@ -49,10 +53,14 @@ class PublishStateMachine(private val totalImages: Int, private val expectedComp
     private fun fail(stage: PublishStage, message: String) =
         Transition(PublishState.Failed(stage, message), listOf(PublishEffect.LogFailure(stage, message)))
 
-    private fun onUrl(state: PublishState, url: String): Transition {
+    private fun onUrl(state: PublishState, url: String, previousUrl: String?): Transition {
         if (PublishUrlParser.isLoginPage(url)) return expired()
         if (state is PublishState.Reviewing) {
             val post = PublishUrlParser.parsePublished(url) ?: return Transition(state, emptyList())
+            // `/{blogId}/{logNo}` 는 플랫폼의 모든 글이 가지는 주소다. 방금 발행한 글로 인정하려면
+            // 내 블로그의 글이면서, 직전 주소가 글쓰기 화면이어야 한다.
+            if (post.blogId != blogId) return Transition(state, emptyList())
+            if (previousUrl == null || !PublishUrlParser.isWritePage(previousUrl)) return Transition(state, emptyList())
             return Transition(PublishState.Published(post.logNo, post.url), listOf(PublishEffect.SavePublished(post.logNo, post.url)))
         }
         return Transition(state, emptyList())

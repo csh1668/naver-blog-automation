@@ -7,8 +7,11 @@ import org.junit.Test
 class PublishStateMachineTest {
     private val loginUrl = "https://nid.naver.com/nidlogin.login?url=x"
     private val publishedUrl = "https://blog.naver.com/PostView.naver?blogId=myblog&logNo=224000000001&isAfterWrite=true"
+    private val writeUrl = "https://blog.naver.com/myblog?Redirect=Write&categoryNo=25"
+    private val permalink = "https://blog.naver.com/myblog/224000000001"
 
-    private fun machine(images: Int = 2, components: Int = 4) = PublishStateMachine(totalImages = images, expectedComponents = components)
+    private fun machine(images: Int = 2, components: Int = 4, blogId: String = "myblog") =
+        PublishStateMachine(totalImages = images, expectedComponents = components, blogId = blogId)
 
     private fun PublishStateMachine.run(vararg events: PublishEvent): List<Transition> {
         var state: PublishState = PublishState.Idle
@@ -25,7 +28,7 @@ class PublishStateMachineTest {
             PublishEvent.PopupsDismissed,
             PublishEvent.ImageUploaded("img_001"), PublishEvent.ImageUploaded("img_002"),
             PublishEvent.Injected(4),
-            PublishEvent.UrlChanged(publishedUrl),
+            PublishEvent.UrlChanged(publishedUrl, writeUrl),
         )
         assertEquals(PublishState.PreparingImages(0, 2), t[0].state)
         assertEquals(listOf(PublishEffect.PrepareImages), t[0].effects)
@@ -59,7 +62,7 @@ class PublishStateMachineTest {
 
     @Test
     fun loginRedirectBecomesSessionExpiredAndSavesPending() {
-        val t = machine().run(PublishEvent.Start, PublishEvent.ImagesPrepared, PublishEvent.UrlChanged(loginUrl))
+        val t = machine().run(PublishEvent.Start, PublishEvent.ImagesPrepared, PublishEvent.UrlChanged(loginUrl, null))
         assertEquals(PublishState.SessionExpired, t.last().state)
         assertEquals(listOf(PublishEffect.SavePending), t.last().effects)
     }
@@ -100,8 +103,33 @@ class PublishStateMachineTest {
             PublishEvent.PopupsDismissed, PublishEvent.Injected(2),
         ).last().state
         assertEquals(PublishState.Reviewing, reviewing)
-        assertEquals(PublishState.Reviewing, m.reduce(reviewing, PublishEvent.UrlChanged("https://blog.naver.com/myblog?Redirect=Write&categoryNo=25")).state)
-        assertEquals(PublishState.SessionExpired, m.reduce(reviewing, PublishEvent.UrlChanged(loginUrl)).state)
+        assertEquals(PublishState.Reviewing, m.reduce(reviewing, PublishEvent.UrlChanged(writeUrl, writeUrl)).state)
+        // 로그인 이동은 직전 주소와 무관하게 세션 만료다.
+        assertEquals(PublishState.SessionExpired, m.reduce(reviewing, PublishEvent.UrlChanged(loginUrl, null)).state)
+        assertEquals(PublishState.SessionExpired, m.reduce(reviewing, PublishEvent.UrlChanged(loginUrl, permalink)).state)
+    }
+
+    /** 글쓰기 페이지에서 나온 이동이 아니면 남의 글이든 옛 글이든 발행으로 보지 않는다. */
+    @Test
+    fun reviewingOnlyAcceptsOwnPostReachedFromTheWritePage() {
+        val m = machine(images = 0, components = 2)
+        val reviewing = PublishState.Reviewing
+
+        // (a) 다른 사용자의 글 주소 — 글쓰기 페이지에서 나왔더라도 무시
+        assertEquals(reviewing, m.reduce(reviewing, PublishEvent.UrlChanged("https://blog.naver.com/someoneelse/224000000001", writeUrl)).state)
+
+        // (b) 내 글 주소지만 직전 주소가 다른 글 주소 — 단순 이동이므로 무시
+        assertEquals(reviewing, m.reduce(reviewing, PublishEvent.UrlChanged(permalink, "https://blog.naver.com/myblog/111111111")).state)
+        assertEquals(reviewing, m.reduce(reviewing, PublishEvent.UrlChanged(permalink, null)).state)
+
+        // (c) 내 글 주소 + 직전이 글쓰기 페이지 → 발행
+        val published = m.reduce(reviewing, PublishEvent.UrlChanged(permalink, writeUrl))
+        assertEquals(PublishState.Published("224000000001", permalink), published.state)
+        assertEquals(listOf(PublishEffect.SavePublished("224000000001", permalink)), published.effects)
+
+        // (d) isAfterWrite 형태 + PostWriteForm 에서 나온 이동 → 발행
+        val fromForm = m.reduce(reviewing, PublishEvent.UrlChanged(publishedUrl, "https://blog.naver.com/PostWriteForm.naver?blogId=myblog&Redirect=Write"))
+        assertEquals(PublishState.Published("224000000001", permalink), fromForm.state)
     }
 
     @Test
@@ -140,7 +168,7 @@ class PublishStateMachineTest {
         val failed = PublishState.Failed(PublishStage.UPLOAD, "x")
         assertEquals(Transition(failed, emptyList()), m.reduce(failed, PublishEvent.EditorReady))
         val published = PublishState.Published("1", "u")
-        assertEquals(Transition(published, emptyList()), m.reduce(published, PublishEvent.UrlChanged(loginUrl)))
+        assertEquals(Transition(published, emptyList()), m.reduce(published, PublishEvent.UrlChanged(loginUrl, writeUrl)))
         // Retry on Published is ignored
         assertEquals(Transition(published, emptyList()), m.reduce(published, PublishEvent.Retry))
     }
