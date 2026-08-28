@@ -1,6 +1,7 @@
 package com.csh.blogwriter.ui.login
 
 import com.csh.blogwriter.data.prefs.SettingsStore
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -92,5 +93,28 @@ class LoginViewModelTest {
         advanceUntilIdle()
         assertEquals(LoginPhase.Done("myblog"), vm.phase.value)
         assertNull(vm.message.value)
+    }
+
+    /** 제한 시간이 저장보다 먼저 지나 로그인 화면으로 되돌아갔다면, 뒤늦게 끝난 저장이 그 상태를 Done 으로 덮어쓰면 안 된다. */
+    @Test
+    fun lateBlogIdPersistenceDoesNotOverwriteTimeoutBackToLogin() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val slowSettings = object : SettingsStore {
+            override val blogId: Flow<String?> = stored
+            override suspend fun setBlogId(id: String?) { gate.await(); stored.value = id }
+        }
+        val vm = LoginViewModel(slowSettings)
+        vm.onUrlChanged("https://www.naver.com/")
+        vm.onUrlChanged("https://blog.naver.com/myblog")
+
+        advanceTimeBy(LoginViewModel.RESOLVE_TIMEOUT_MS + 1_000)
+        advanceUntilIdle()
+        assertEquals(LoginPhase.LoggingIn, vm.phase.value)
+        assertEquals("블로그 정보를 확인하지 못했어요. 다시 로그인해 주세요.", vm.message.value)
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(LoginPhase.LoggingIn, vm.phase.value)
+        assertEquals("블로그 정보를 확인하지 못했어요. 다시 로그인해 주세요.", vm.message.value)
     }
 }

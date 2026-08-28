@@ -54,9 +54,13 @@ class LoginViewModel @Inject constructor(private val settings: SettingsStore) : 
                 resolving = true
                 viewModelScope.launch {
                     settings.setBlogId(id)
-                    resolveTimeout?.cancel()
-                    _phase.value = LoginPhase.Done(id)
-                    resolving = false
+                    // 저장이 끝나기 전에 제한 시간이 먼저 지나 로그인 화면으로 돌아갔을 수 있다(resolving=false 로 표시됨).
+                    // 그 사이 상태를 되돌아온 뒤에 Done 으로 덮어쓰지 않는다.
+                    if (resolving && _phase.value is LoginPhase.ResolvingBlogId) {
+                        resolveTimeout?.cancel()
+                        _phase.value = LoginPhase.Done(id)
+                        resolving = false
+                    }
                 }
             }
             is LoginPhase.Done -> Unit
