@@ -19,6 +19,8 @@ abstract class DataModule {
     @Binds @Singleton abstract fun historyRepository(impl: RoomHistoryRepository): HistoryRepository
     @Binds @Singleton abstract fun failureLogRepository(impl: RoomFailureLogRepository): FailureLogRepository
     @Binds @Singleton abstract fun pendingJobRepository(impl: RoomPendingJobRepository): PendingJobRepository
+    @Binds @Singleton abstract fun chatRepository(impl: RoomChatRepository): ChatRepository
+    @Binds @Singleton abstract fun memoryRepository(impl: RoomMemoryRepository): MemoryRepository
     @Binds @Singleton abstract fun settingsStore(impl: DataStoreSettingsStore): SettingsStore
     @Binds abstract fun imagePreparing(impl: ImagePreparer): ImagePreparing
 

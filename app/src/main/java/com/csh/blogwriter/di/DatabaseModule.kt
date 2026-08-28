@@ -7,7 +7,10 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.room.Room
 import com.csh.blogwriter.data.db.AppDatabase
+import com.csh.blogwriter.data.db.ChatDao
 import com.csh.blogwriter.data.db.FailureLogDao
+import com.csh.blogwriter.data.db.MIGRATION_1_2
+import com.csh.blogwriter.data.db.MemoryDao
 import com.csh.blogwriter.data.db.PendingJobDao
 import com.csh.blogwriter.data.db.PublishHistoryDao
 import dagger.Module
@@ -23,7 +26,7 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
-        Room.databaseBuilder(context, AppDatabase::class.java, "blogwriter.db").build()
+        Room.databaseBuilder(context, AppDatabase::class.java, "blogwriter.db").addMigrations(MIGRATION_1_2).build()
 
     @Provides
     fun providePublishHistoryDao(db: AppDatabase): PublishHistoryDao = db.publishHistoryDao()
@@ -33,6 +36,12 @@ object DatabaseModule {
 
     @Provides
     fun providePendingJobDao(db: AppDatabase): PendingJobDao = db.pendingJobDao()
+
+    @Provides
+    fun provideChatDao(db: AppDatabase): ChatDao = db.chatDao()
+
+    @Provides
+    fun provideMemoryDao(db: AppDatabase): MemoryDao = db.memoryDao()
 
     @Provides
     @Singleton
