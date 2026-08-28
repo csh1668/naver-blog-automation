@@ -92,7 +92,8 @@ fun Composer(
 
     Row(
         Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm),
-        verticalAlignment = Alignment.Bottom,
+        // 입력창이 여러 줄로 늘어나도 버튼들은 그 세로 중앙에 붙는다.
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(
             onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },

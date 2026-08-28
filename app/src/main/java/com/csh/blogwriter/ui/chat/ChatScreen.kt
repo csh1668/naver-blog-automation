@@ -55,6 +55,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import android.os.Bundle
@@ -323,9 +324,10 @@ private fun ChatPane(
             ) {
                 Column(Modifier.widthIn(max = AppSpacing.contentMaxWidth).padding(vertical = AppSpacing.lg)) {
                     Text(
-                        "오늘은 어떤 이야기를\n올릴까요?",
+                        "오늘은 어떤 이야기를 올릴까요?",
                         style = AppTheme.typography.display, color = c.textPrimary,
-                        modifier = Modifier.padding(horizontal = AppSpacing.lg),
+                        textAlign = TextAlign.Center, maxLines = 1, softWrap = false,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg),
                     )
                     Spacer(Modifier.height(AppSpacing.section))
                     AttachmentTray(ui.tray, viewModel)
