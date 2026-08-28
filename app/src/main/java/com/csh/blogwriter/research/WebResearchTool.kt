@@ -40,7 +40,9 @@ class WebResearchTool @Inject constructor(@ApplicationContext private val contex
     }
 
     override suspend fun openPage(url: String): PageText? {
-        if (!url.startsWith("http")) return null
+        // "httpx://…" 같은 것도 startsWith("http") 를 통과한다 — 스킴을 제대로 본다.
+        val scheme = runCatching { java.net.URI(url).scheme }.getOrNull()?.lowercase()
+        if (scheme !in setOf("http", "https")) return null
         val raw = hidden.loadAndExtract(url, "${script()}; __research.pageText()", 10_000) ?: return null
         val obj = runCatching { json.parseToJsonElement(unquote(raw)).jsonObject }.getOrNull() ?: return null
         return PageText(obj["title"]?.jsonPrimitive?.content.orEmpty(), obj["text"]?.jsonPrimitive?.content.orEmpty().take(4000))

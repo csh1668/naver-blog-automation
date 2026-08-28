@@ -53,10 +53,15 @@ class DefaultToolExecutor @Inject constructor(
                     }
                 }
                 "remember" -> {
-                    onProgress("기억해 둘게요…")
-                    val kind = runCatching { MemoryKind.valueOf(args["kind"]!!.jsonPrimitive.content) }.getOrDefault(MemoryKind.PREFERENCE)
-                    val item = memory.add(kind, args["text"]?.jsonPrimitive?.content.orEmpty(), "chat")
-                    buildJsonObject { put("saved", true); put("id", item.id) }
+                    // 빈 항목을 저장하면 "기억한 것들"에 빈 줄이 쌓이고 프롬프트 자리만 먹는다.
+                    val text = args["text"]?.jsonPrimitive?.content?.trim().orEmpty()
+                    if (text.isEmpty()) buildJsonObject { put("error", "empty") }
+                    else {
+                        onProgress("기억해 둘게요…")
+                        val kind = runCatching { MemoryKind.valueOf(args["kind"]!!.jsonPrimitive.content) }.getOrDefault(MemoryKind.PREFERENCE)
+                        val item = memory.add(kind, text, "chat")
+                        buildJsonObject { put("saved", true); put("id", item.id) }
+                    }
                 }
                 else -> buildJsonObject { put("error", "unknown tool") }
             }

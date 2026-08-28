@@ -64,6 +64,17 @@ class DefaultToolExecutorTest {
         assertEquals("unknown tool", ex.execute("nope", buildJsonObject {}) {}["error"]!!.jsonPrimitive.content)
     }
 
+    /** 빈 문장을 기억해 두면 "기억한 것들"에 빈 줄이 쌓이고 프롬프트 자리만 먹는다. */
+    @Test
+    fun rememberWithBlankTextSavesNothing() = runTest {
+        val ex = DefaultToolExecutor(research, memory, settings)
+        val progress = mutableListOf<String>()
+        val r = ex.execute("remember", buildJsonObject { put("kind", "PREFERENCE"); put("text", "   ") }) { progress += it }
+        assertEquals("empty", r["error"]!!.jsonPrimitive.content)
+        assertTrue(added.isEmpty())
+        assertTrue(progress.isEmpty())
+    }
+
     @Test
     fun researchDisabledSkipsToolsWithoutProgressOrCounter() = runTest {
         researchOn.value = false

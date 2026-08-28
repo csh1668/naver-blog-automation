@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
 import android.webkit.CookieManager
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +38,8 @@ class HiddenWebView(private val context: Context) {
         w.settings.userAgentString = UA
         CookieManager.getInstance().setAcceptThirdPartyCookies(w, false)
         w.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest): Boolean =
+                blockedNavigation(request.url.toString())
             override fun onPageFinished(v: WebView, url: String) { onLoaded?.invoke(url) }
         }
         web = w
@@ -70,4 +73,18 @@ class HiddenWebView(private val context: Context) {
     }
 
     fun destroy() { web?.destroy(); web = null }
+}
+
+/**
+ * 숨은 WebView 가 따라가면 안 되는 이동인가(true = 막는다).
+ * 자료 조사용 창이 로그인 페이지나 글쓰기 화면으로 새면 사용자의 네이버 세션을 건드릴 수 있고,
+ * http(s) 가 아닌 스킴은 다른 앱을 띄운다.
+ */
+internal fun blockedNavigation(url: String): Boolean {
+    val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return true
+    val scheme = uri.scheme?.lowercase()
+    if (scheme != "http" && scheme != "https") return true
+    val host = uri.host?.lowercase().orEmpty()
+    if (host == "nid.naver.com" || host.endsWith(".nid.naver.com")) return true
+    return url.contains("Redirect=Write")
 }

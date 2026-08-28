@@ -411,6 +411,58 @@ class ChatViewModelTest {
         assertEquals(listOf("a", "b"), vm.uiState.value.tray.map { it.uri })
     }
 
+    /** 초안이 나온 뒤 붙인 사진은 에디터에 올라가 있지 않아 다음 주입이 통째로 깨진다 — SP2 에서는 막는다. */
+    @Test
+    fun attachingPhotosAfterADraftIsRefused() = runTest {
+        turns += TurnResult.Success(TurnResponse("초안이에요", post = post()), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.attachPhotos(listOf("a")); advanceUntilIdle()
+        vm.requestDraft(); advanceUntilIdle()
+        assertNotNull(vm.uiState.value.panelJobId)
+
+        vm.attachPhotos(listOf("b")); advanceUntilIdle()
+
+        assertEquals(listOf("a"), vm.uiState.value.attachments.map { it.uri })
+        assertEquals(ChatViewModel.NO_PHOTO_AFTER_DRAFT, vm.uiState.value.error)
+    }
+
+    /** 사진 메시지를 그대로 이어 붙이면 뺀 사진이 돌아오고 ref 가 겹친다 — uri 로 걸러 번호를 다시 매긴다. */
+    @Test
+    fun reopeningASessionRestoresUniqueRefsAndUris() = runTest {
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        val sessionId = vm.uiState.value.session!!.id
+        vm.attachPhotos(listOf("u1", "u2")); advanceUntilIdle()
+        vm.removePhoto("img_001")
+        vm.attachPhotos(listOf("u3")); advanceUntilIdle()
+
+        val reopened = newViewModel(); reopened.open(sessionId); advanceUntilIdle()
+
+        val restored = reopened.uiState.value.attachments
+        val refs = restored.map { it.ref }
+        val uris = restored.map { it.uri }
+        assertEquals(refs.size, refs.distinct().size)
+        assertEquals(uris.size, uris.distinct().size)
+        assertEquals((1..refs.size).map { "img_%03d".format(it) }, refs)
+    }
+
+    /** 세션이 가리키던 작업이 사라졌으면(완료·삭제) 연결을 끊는다 — 안 그러면 "초안 열기"가 매번 실패한다. */
+    @Test
+    fun openingASessionWhoseJobVanishedDetachesIt() = runTest {
+        turns += TurnResult.Success(TurnResponse("초안이에요", post = post()), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        val sessionId = vm.uiState.value.session!!.id
+        vm.requestDraft(); advanceUntilIdle()
+        val jobId = vm.uiState.value.panelJobId!!
+        pendingJobs.delete(jobId)
+
+        val reopened = newViewModel(); reopened.open(sessionId); advanceUntilIdle()
+
+        assertNull(reopened.uiState.value.panelJobId)
+        assertNull(reopened.uiState.value.session!!.pendingJobId)
+        assertEquals(SessionStatus.DRAFTING, reopened.uiState.value.session!!.status)
+        assertNull(chatRepo.getSession(sessionId)!!.pendingJobId)
+    }
+
     @Test
     fun publishingClosesThePanelClearsThePhotoCacheAndCallsTheHook() = runTest {
         turns += TurnResult.Success(TurnResponse("초안이에요", post = post()), emptyList(), "flash")

@@ -2,7 +2,6 @@ package com.csh.blogwriter.chat
 
 import com.csh.blogwriter.domain.model.Block
 import com.csh.blogwriter.domain.model.PostContent
-import com.csh.blogwriter.domain.model.Run
 
 object PostContentRepair {
     data class Repaired(val content: PostContent, val fixes: List<String>)

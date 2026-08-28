@@ -63,7 +63,10 @@ class ApiKeysViewModel @Inject constructor(private val keyStore: ApiKeyStore, pr
         val added = keyStore.add(valid.map { it.secret })
         added.forEach { addedKey ->
             val status = valid.firstOrNull { it.secret == addedKey.secret }?.status
-            if (status == Candidate.Status.LIMITED) keyStore.markLimited(addedKey.id) else keyStore.markOk(addedKey.id)
+            // 429 도 "키는 실존한다"는 증거다 — markOk 를 빼면 lastOkAt 이 비어 usable 이 아니게 되고
+            // 로테이션에서도, 열쇠 있음 배너에서도 빠져 버린다.
+            keyStore.markOk(addedKey.id)
+            if (status == Candidate.Status.LIMITED) keyStore.markLimited(addedKey.id)
         }
         _uiState.update { it.copy(candidates = results, busy = false) }
         refreshKeys()

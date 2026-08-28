@@ -61,6 +61,8 @@ class ApiKeysViewModelTest {
         assertEquals(listOf(Candidate.Status.LIMITED), vm.uiState.value.candidates.map { it.status })
         assertEquals(1, stored.value.size)
         assertEquals(listOf(stored.value[0].id), limitedIds)
+        // 한도 키도 실존하는 키다 — usable 이 아니면 로테이션에서도 열쇠 배너에서도 빠진다.
+        assertEquals(true, stored.value[0].usable)
     }
 
     @Test

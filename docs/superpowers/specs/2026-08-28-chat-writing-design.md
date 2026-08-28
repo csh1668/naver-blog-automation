@@ -218,4 +218,7 @@ onResult(key, model, outcome):
 - **PIN 변경은 별도 진입 경로**: §4.4는 PIN 설정·검증만 서술했지만, 구현은 설정 화면의 "PIN 변경" 항목이 `PinGateScreen(forceSet = true)`로 진입해 기존 PIN 확인 없이 바로 새 PIN을 두 번 입력하게 한다(확인 시점에만 덮어씀).
 - **키 검증 상태 값**: §4.1의 "유효/무효/한도/네트워크 오류" 서술은 구현에서 `KeyProbe`/`Candidate.Status` = `PENDING/VALID/INVALID/LIMITED/ERROR`로 나타난다. `VALID`와 `LIMITED`(429) 모두 유효한 키로 간주해 저장한다(`GeminiClient.listModels`, `ApiKeysViewModel`).
 - **메모리 추출은 발행 완료 후 백그라운드**: §8/`MemoryExtractor` 설계대로, 발행이 끝나면 `ChatViewModel.onPublished`가 앱 스코프에서 `MemoryExtractor`를 실행해 대화 전체에서 최대 3개 항목을 뽑아 즉시 저장하고, 채팅에 "이런 점을 기억해 둘게요: …" SYSTEM 메시지를 남긴다. 화면을 벗어나도 끊기지 않으며, 실패해도 사용자에게 알리지 않는다.
+- **초안 이후 사진 추가는 SP2에서 막음(증분 업로드는 SP3)**: 초안이 나온 뒤 사진을 더 붙이면 그 사진은 아직 에디터에 올라가 있지 않아 다음 수정본 주입이 통째로 실패한다(`DocumentModelConverter.convert`의 `requireNotNull`). 그래서 `panelJobId != null`인 동안 `ChatViewModel.attachPhotos`가 거절하고 `Composer`의 사진 버튼도 비활성이며 "초안을 만든 뒤에는 사진을 더 붙일 수 없어요. 새 글에서 이어 가 주세요." 안내를 보여 준다.
+- **`PHOTOS` payload 모양**: §5는 `[{uri, ref, width, height, takenAt}]` 배열로 적었지만, 구현(`ChatPayloads.photos`)은 객체 하나 `{count, refs, uris}`다(가로·세로·촬영 시각은 채팅에서 쓰지 않는다).
+- **대화를 다시 열 때 사진 복원의 한계**: `ChatViewModel.restoreAttachments`는 `PHOTOS` 메시지를 모아 uri로 중복을 걸러 내고 ref를 다시 매긴다. 남는 문제 — 뺐던 사진은 메시지 기록에 그대로 남아 있어 대화를 다시 열면 목록에 되살아난다(SP3에서 제거 이벤트를 기록해 해결).
 - **발행 버튼은 앱이 절대 누르지 않는다**: §6/§13대로 구현되어 있으며, `ChatViewModel`에도 "발행 버튼은 사용자가 직접 누른다"는 주석으로 명시. 앱은 초안을 에디터에 채워 넣는 데까지만 관여한다.

@@ -57,6 +57,7 @@ class ChatViewModel @Inject constructor(
         const val RETRY_CHIP = "다시 시도"
         const val DRAFT_CHIP = "이대로 초안 써 줘"
         const val NO_KEY = "글을 쓰려면 관리자가 열쇠를 등록해야 해요"
+        const val NO_PHOTO_AFTER_DRAFT = "초안을 만든 뒤에는 사진을 더 붙일 수 없어요. 새 글에서 이어 가 주세요."
         private val DRAFT_WORDS = Regex("초안|써 줘|작성해")
     }
 
@@ -91,7 +92,7 @@ class ChatViewModel @Inject constructor(
         readyToDraft = false
         lastDraftTurn = false
         viewModelScope.launch {
-            val session = sessionId?.let { chatRepo.getSession(it) } ?: chatRepo.createSession()
+            val session = detachVanishedJob(sessionId?.let { chatRepo.getSession(it) } ?: chatRepo.createSession())
             val photos = restoreAttachments(session.id)
             // 새 상태로 통째로 갈아 끼운다 — thinking·streamingSay·toolStatus·칩이 함께 초기화된다.
             _uiState.value = ChatUiState(
@@ -107,6 +108,21 @@ class ChatViewModel @Inject constructor(
                 chatRepo.observeMessages(session.id).collect { list -> _uiState.update { it.copy(messages = list) } }
             }
         }
+    }
+
+    /**
+     * 세션이 가리키는 발행 작업이 사라졌으면(발행 완료·채팅 밖에서 삭제) 연결을 끊는다.
+     * 그대로 두면 "초안 열기"가 매번 "작업을 찾을 수 없음" → 대체 화면으로 떨어져 대화가 갇힌다.
+     */
+    private suspend fun detachVanishedJob(session: ChatSession): ChatSession {
+        val jobId = session.pendingJobId ?: return session
+        if (pendingJobs.get(jobId) != null) return session
+        val fixed = session.copy(
+            pendingJobId = null,
+            status = if (session.publishedUrl != null) SessionStatus.PUBLISHED else SessionStatus.DRAFTING,
+        )
+        chatRepo.updateSession(fixed)
+        return fixed
     }
 
     fun send(text: String) {
@@ -126,6 +142,12 @@ class ChatViewModel @Inject constructor(
     fun attachPhotos(uris: List<String>) {
         if (uris.isEmpty()) return
         val session = _uiState.value.session ?: return
+        // 초안이 나온 뒤에 붙인 사진은 아직 에디터에 올라가 있지 않다 — 다음 수정본이 그 ref 를 쓰면
+        // 주입이 통째로 실패한다. 증분 업로드는 SP3, SP2 에서는 아예 막는다.
+        if (_uiState.value.panelJobId != null) {
+            _uiState.update { it.copy(error = NO_PHOTO_AFTER_DRAFT) }
+            return
+        }
         // 같은 사진을 두 번 고르면 ref 도 사진판 키도 겹친다 — 이미 붙인 것은 건너뛴다.
         val already = _uiState.value.attachments.map { it.uri }.toSet()
         val fresh = uris.distinct().filterNot { it in already }
@@ -348,9 +370,17 @@ class ChatViewModel @Inject constructor(
     private fun lastPost(history: List<ChatMessage>): PostContent? =
         history.lastOrNull { it.kind == MessageKind.POST }?.let { ChatPayloads.readPost(it.payloadJson) }
 
+    /**
+     * 사진 메시지는 붙일 때마다 새로 쌓이고 번호도 그때그때 다시 매긴 값이라, 그대로 이어 붙이면
+     * 같은 사진이 두 번 들어오거나 ref 가 겹친다 — uri 로 한 번 걸러 내고 번호를 다시 매긴다.
+     * (뺐던 사진이 되살아나는 것은 남는 문제 — 스펙 §14 참고.)
+     */
     private suspend fun restoreAttachments(sessionId: String): List<AttachedPhoto> =
-        chatRepo.messagesOnce(sessionId)
-            .filter { it.kind == MessageKind.PHOTOS }
-            .mapNotNull { ChatPayloads.readPhotos(it.payloadJson) }
-            .flatMap { payload -> payload.refs.zip(payload.uris) { ref, uri -> AttachedPhoto(ref, uri, null) } }
+        renumber(
+            chatRepo.messagesOnce(sessionId)
+                .filter { it.kind == MessageKind.PHOTOS }
+                .mapNotNull { ChatPayloads.readPhotos(it.payloadJson) }
+                .flatMap { payload -> payload.refs.zip(payload.uris) { ref, uri -> AttachedPhoto(ref, uri, null) } }
+                .distinctBy { it.uri }
+        )
 }

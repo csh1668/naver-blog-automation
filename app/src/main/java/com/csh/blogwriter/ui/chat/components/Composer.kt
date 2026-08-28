@@ -52,6 +52,8 @@ fun Composer(
     onAttach: (List<String>) -> Unit,
     enabled: Boolean,
     placeholder: String,
+    /** 초안이 나온 뒤에는 사진을 더 붙일 수 없다 (증분 업로드는 SP3). */
+    canAttach: Boolean = true,
 ) {
     val c = AppTheme.colors
     val context = LocalContext.current
@@ -89,7 +91,7 @@ fun Composer(
     ) {
         IconButton(
             onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-            enabled = enabled,
+            enabled = enabled && canAttach,
             modifier = Modifier.size(AppSpacing.touchTarget),
         ) {
             Icon(Icons.Rounded.AddPhotoAlternate, contentDescription = "사진 붙이기", tint = c.textSecondary)

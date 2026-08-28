@@ -5,12 +5,15 @@ import kotlinx.coroutines.flow.first
 import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.inject.Inject
+import javax.inject.Singleton
 
 /**
  * 관리자 PIN 해시·잠금 정책.
  * `pinHash` 는 SettingsStore 에 `"<saltHex>:<sha256Hex>"` 형태의 한 문자열로 저장된다(설정마다 랜덤 솔트).
- * 잠금 상태(실패 횟수, 잠금 해제 시각)는 프로세스 메모리에만 둔다.
+ * 잠금 상태(실패 횟수, 잠금 해제 시각)는 프로세스 메모리에만 둔다 —
+ * 화면마다 새로 만들면 나갔다 들어오는 것만으로 잠금이 풀리므로 앱에 하나만 둔다.
  */
+@Singleton
 class PinManager(private val settings: SettingsStore, private val clock: () -> Long) {
     @Inject constructor(settings: SettingsStore) : this(settings, System::currentTimeMillis)
 

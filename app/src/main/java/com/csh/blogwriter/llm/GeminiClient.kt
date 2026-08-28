@@ -1,6 +1,9 @@
 package com.csh.blogwriter.llm
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
@@ -38,18 +41,30 @@ class GeminiClient(
         val body = json.encodeToString(GRequest.serializer(), request).toRequestBody(mediaType)
         val req = Request.Builder().url("$baseUrl/v1beta/models/$model:streamGenerateContent?alt=sse")
             .header("x-goog-api-key", apiKey).header("Content-Type", "application/json").post(body).build()
-        val response = try { http.newCall(req).execute() } catch (e: IOException) { throw GeminiException(0, null, "네트워크 오류", e) }
-        response.use { res ->
-            if (!res.isSuccessful) throw parseError(res.code, res.body?.string().orEmpty())
-            val source = res.body!!.source()
-            while (!source.exhausted()) {
-                val line = source.readUtf8Line() ?: break
-                if (!line.startsWith("data:")) continue
-                val payload = line.removePrefix("data:").trim()
-                if (payload.isEmpty() || payload == "[DONE]") continue
-                if (payload.startsWith("{\"error\"")) throw parseError(500, payload)
-                emit(json.decodeFromString(GResponse.serializer(), payload))
+        val call = http.newCall(req)
+        // 수집을 멈추면 소켓을 바로 끊는다. finally 만으로는 블로킹 read 에 묶여 다음 SSE 줄(최대 120초)까지 안 풀린다.
+        val cancelOnStop = currentCoroutineContext().job.invokeOnCompletion { call.cancel() }
+        try {
+            call.execute().use { res ->
+                if (!res.isSuccessful) throw parseError(res.code, res.body?.string().orEmpty())
+                val source = res.body!!.source()
+                while (!source.exhausted()) {
+                    currentCoroutineContext().ensureActive()
+                    val line = source.readUtf8Line() ?: break
+                    if (!line.startsWith("data:")) continue
+                    val payload = line.removePrefix("data:").trim()
+                    if (payload.isEmpty() || payload == "[DONE]") continue
+                    if (payload.startsWith("{\"error\"")) throw parseError(500, payload)
+                    emit(json.decodeFromString(GResponse.serializer(), payload))
+                }
             }
+        } catch (e: IOException) {
+            // 취소로 끊긴 소켓이면 네트워크 오류가 아니라 취소로 알린다.
+            currentCoroutineContext().ensureActive()
+            throw GeminiException(0, null, "네트워크 오류", e)
+        } finally {
+            cancelOnStop.dispose()
+            call.cancel()
         }
     }.flowOn(Dispatchers.IO)
 

@@ -34,6 +34,18 @@ class PromptBuilderTest {
         assertFalse(s.contains("점검 문안"))
     }
 
+    /** STYLE 항목은 {{style}} 로 이미 들어간다 — 기억 목록에 또 넣으면 같은 문장이 두 번 실린다. */
+    @Test
+    fun styleMemoryIsNotRepeatedInTheMemoryList() = runTest {
+        val s = PromptBuilder(store).system(
+            memory = listOf(mem(1, MemoryKind.STYLE), mem(2)),
+            style = "항목1", targetLength = 900..1400, draftTurn = false,
+        )
+        assertFalse(s.contains("- STYLE: 항목1"))
+        assertTrue(s.contains("스타일: 항목1"))
+        assertTrue(s.contains("- PREFERENCE: 항목2"))
+    }
+
     @Test
     fun draftTurnAppendsSelfCheckAndCapsMemory() = runTest {
         val s = PromptBuilder(store).system(memory = (1..50).map { mem(it) }, style = null, targetLength = 900..1400, draftTurn = true)

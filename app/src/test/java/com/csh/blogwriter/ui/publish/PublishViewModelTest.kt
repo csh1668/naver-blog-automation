@@ -146,6 +146,18 @@ class PublishViewModelTest {
         assertEquals(listOf(File("/tmp/prepared.jpg").absolutePath), pending.value!!.preparedPaths)
     }
 
+    /** 채팅에서 글을 고치면 작업을 다시 저장한다 — 그때 준비된 사진 경로가 지워지면 재개가 PREPARE 에서 깨진다. */
+    @Test
+    fun reinjectKeepsPreparedPaths() = runTest {
+        val vm = vm(); vm.attach(FakeController()); runCurrent()
+        assertEquals(listOf(File("/tmp/img.jpg").absolutePath), pending.value!!.preparedPaths)
+
+        vm.reinject(PostContent("새 제목", listOf(Block.Paragraph(listOf(Run("고친 본문"))), Block.Image("img_001")))); runCurrent()
+
+        assertEquals("새 제목", pending.value!!.content.title)
+        assertEquals(listOf(File("/tmp/img.jpg").absolutePath), pending.value!!.preparedPaths)
+    }
+
     @Test
     fun loginRedirectSavesPendingAndSignalsSessionExpired() = runTest {
         val vm = vm(); val c = FakeController()

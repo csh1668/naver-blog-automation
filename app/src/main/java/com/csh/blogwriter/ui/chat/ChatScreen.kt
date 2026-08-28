@@ -287,6 +287,15 @@ private fun ChatPane(
         }
         QuickReplyChips(ui.quickReplies) { justSent = true; viewModel.sendQuickReply(it) }
         AttachmentTray(ui.tray, viewModel)
+        // 초안이 나온 뒤 붙인 사진은 에디터에 올라가 있지 않아 다음 수정본 주입이 깨진다 — 버튼을 막고 이유를 알려 준다.
+        if (ui.panelJobId != null) {
+            Text(
+                ChatViewModel.NO_PHOTO_AFTER_DRAFT,
+                style = AppTheme.typography.caption,
+                color = c.textTertiary,
+                modifier = Modifier.padding(horizontal = AppSpacing.lg),
+            )
+        }
         Composer(
             text = draft,
             onTextChange = { draft = it },
@@ -294,6 +303,7 @@ private fun ChatPane(
             onAttach = viewModel::attachPhotos,
             enabled = ui.hasKey && !ui.thinking,
             placeholder = if (ui.thinking) "글을 구상하고 있어요" else "오늘 있었던 일을 들려주세요",
+            canAttach = ui.panelJobId == null,
         )
     }
 }
