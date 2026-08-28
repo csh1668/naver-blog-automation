@@ -5,7 +5,9 @@ import com.csh.blogwriter.data.repo.PendingJob
 import com.csh.blogwriter.data.repo.PendingJobRepository
 import com.csh.blogwriter.domain.model.Block
 import com.csh.blogwriter.domain.model.PostContent
+import com.csh.blogwriter.domain.model.PreparedImage
 import com.csh.blogwriter.domain.model.Run
+import com.csh.blogwriter.ui.publish.ImagePreparing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -30,7 +32,15 @@ class FallbackViewModelTest {
         override suspend fun save(job: PendingJob) {}
         override suspend fun setPreparedPaths(id: String, paths: List<String>?) {}
         override suspend fun setLastFailure(id: String, message: String?) {}
-        override suspend fun delete(id: String) {}
+        override suspend fun delete(id: String) { deletedIds += id }
+    }
+    private val deletedIds = mutableListOf<String>()
+
+    private class FakeImagePreparing : ImagePreparing {
+        val clearedIds = mutableListOf<String>()
+        override suspend fun prepare(jobId: String, uris: List<String>, onProgress: (Int) -> Unit): List<PreparedImage> = emptyList()
+        override fun load(jobId: String, paths: List<String>): List<PreparedImage>? = null
+        override fun clear(jobId: String) { clearedIds += jobId }
     }
 
     private val job = PendingJob(
@@ -46,7 +56,7 @@ class FallbackViewModelTest {
 
     @Test
     fun buildsUserFacingStateFromJob() = runTest {
-        val vm = FallbackViewModel(SavedStateHandle(mapOf("jobId" to "j")), repo)
+        val vm = FallbackViewModel(SavedStateHandle(mapOf("jobId" to "j")), repo, FakeImagePreparing())
         advanceUntilIdle()
         val s = vm.uiState.value!!
         assertEquals("제목", s.title)
@@ -58,10 +68,24 @@ class FallbackViewModelTest {
     @Test
     fun derivesReasonFromLoadEditorStagePrefix() = runTest {
         val loadEditorJob = job.copy(lastFailure = "LOAD_EDITOR: 제한 시간 초과")
-        val vm = FallbackViewModel(SavedStateHandle(mapOf("jobId" to "j")), repoWith(loadEditorJob))
+        val vm = FallbackViewModel(SavedStateHandle(mapOf("jobId" to "j")), repoWith(loadEditorJob), FakeImagePreparing())
         advanceUntilIdle()
         val s = vm.uiState.value!!
         assertEquals("네이버 글쓰기 화면이 열리지 않았어요.", s.reason)
+    }
+
+    /** "이 글은 그만 쓰기" 확인 시 대기 작업을 지우고 준비해 둔 사진 캐시도 지운다. */
+    @Test
+    fun discardDeletesJobAndClearsPreparedImages() = runTest {
+        val preparer = FakeImagePreparing()
+        val vm = FallbackViewModel(SavedStateHandle(mapOf("jobId" to "j")), repo, preparer)
+        advanceUntilIdle()
+
+        vm.discard()
+        advanceUntilIdle()
+
+        assertEquals(listOf("j"), deletedIds)
+        assertEquals(listOf("j"), preparer.clearedIds)
     }
 
     @Test

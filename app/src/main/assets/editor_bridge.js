@@ -23,7 +23,7 @@ window.__app = (function () {
       if (!f) return;
       f.style.height = window.innerHeight + 'px';
       f.style.width = '100%';
-    } catch (e) { err('fit', e); }
+    } catch (e) { log('fit failed: ' + ((e && (e.stack || e.message)) || String(e))); }
   }
 
   function className(n) {

@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.csh.blogwriter.data.repo.PendingJobRepository
 import com.csh.blogwriter.publish.FallbackTextRenderer
+import com.csh.blogwriter.ui.publish.ImagePreparing
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,10 +24,22 @@ object FallbackReason {
 }
 
 @HiltViewModel
-class FallbackViewModel @Inject constructor(savedState: SavedStateHandle, private val pendingJobs: PendingJobRepository) : ViewModel() {
+class FallbackViewModel @Inject constructor(
+    savedState: SavedStateHandle,
+    private val pendingJobs: PendingJobRepository,
+    private val preparer: ImagePreparing,
+) : ViewModel() {
     private val jobId: String = checkNotNull(savedState["jobId"])
     private val _uiState = MutableStateFlow<FallbackUiState?>(null)
     val uiState: StateFlow<FallbackUiState?> = _uiState
+
+    /** 올리다 만 글을 그만 쓴다: 대기 작업과 준비해 둔 사진 캐시를 지운다. 갤러리 원본은 건드리지 않는다. */
+    fun discard() {
+        viewModelScope.launch {
+            pendingJobs.delete(jobId)
+            preparer.clear(jobId)
+        }
+    }
 
     init {
         viewModelScope.launch {
