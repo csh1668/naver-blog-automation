@@ -26,11 +26,12 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    val releaseKeystorePath = System.getenv("KEYSTORE_PATH") ?: propOrNull("storeFile")
+
     signingConfigs {
         create("release") {
-            val ksPath = System.getenv("KEYSTORE_PATH") ?: propOrNull("storeFile")
-            if (ksPath != null) {
-                storeFile = rootProject.file(ksPath)
+            if (releaseKeystorePath != null) {
+                storeFile = rootProject.file(releaseKeystorePath)
                 storePassword = System.getenv("KEYSTORE_PASSWORD") ?: propOrNull("storePassword")
                 keyAlias = System.getenv("KEY_ALIAS") ?: propOrNull("keyAlias")
                 keyPassword = System.getenv("KEY_PASSWORD") ?: propOrNull("keyPassword")
@@ -43,7 +44,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("release")
+            // 키스토어가 없으면(예: CI 의 빌드 확인) 서명하지 않고 unsigned APK 로 만든다.
+            signingConfig = if (releaseKeystorePath != null) signingConfigs.getByName("release") else null
         }
     }
 

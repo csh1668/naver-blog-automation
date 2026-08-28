@@ -10,6 +10,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.csh.blogwriter.BuildConfig
 import com.csh.blogwriter.domain.model.PreparedImage
 import com.csh.blogwriter.ui.publish.EditorController
 import org.json.JSONArray
@@ -27,14 +28,18 @@ class NaverEditorWebView(context: Context, private val listener: Listener) : Edi
 
     companion object { private const val TAG = "NaverEditorWebView" }
 
-    private var interceptor = LocalImageInterceptor(emptyMap())
+    // 메인 스레드에서 쓰고 WebView 스레드(shouldInterceptRequest)에서 읽는다.
+    @Volatile private var interceptor = LocalImageInterceptor(emptyMap())
     private var bridgeScript: String? = null
 
     val view: WebView = WebView(context).also { web ->
         NaverWebViewConfig.apply(web)
-        // JS 쪽 B.log 는 화면에서 쓰지 않으므로 여기서 로그캣에 남긴다 (팝업 자동 닫기 등 확인용).
+        // JS 쪽 B.log 는 화면에서 쓰지 않으므로 디버그 빌드에서만 로그캣에 남긴다 (팝업 자동 닫기 등 확인용).
         val logging = object : Listener by listener {
-            override fun onLog(message: String) { Log.d(TAG, "JS $message"); listener.onLog(message) }
+            override fun onLog(message: String) {
+                if (BuildConfig.DEBUG) Log.d(TAG, "JS $message")
+                listener.onLog(message)
+            }
         }
         web.addJavascriptInterface(EditorBridge(logging), "AndroidBridge")
         web.webViewClient = object : WebViewClient() {
@@ -49,7 +54,7 @@ class NaverEditorWebView(context: Context, private val listener: Listener) : Edi
         }
         web.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(m: ConsoleMessage): Boolean {
-                Log.d(TAG, "JS[${m.messageLevel()}] ${m.message()} (${m.sourceId()}:${m.lineNumber()})")
+                if (BuildConfig.DEBUG) Log.d(TAG, "JS[${m.messageLevel()}] ${m.message()} (${m.sourceId()}:${m.lineNumber()})")
                 return true
             }
         }
