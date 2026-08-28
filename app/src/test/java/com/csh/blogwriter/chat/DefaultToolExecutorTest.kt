@@ -1,11 +1,15 @@
 package com.csh.blogwriter.chat
 
+import com.csh.blogwriter.data.prefs.SettingsStore
 import com.csh.blogwriter.data.repo.MemoryItem
 import com.csh.blogwriter.data.repo.MemoryKind
 import com.csh.blogwriter.data.repo.MemoryRepository
 import com.csh.blogwriter.research.PageText
 import com.csh.blogwriter.research.ResearchTool
 import com.csh.blogwriter.research.SearchHit
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.buildJsonObject
@@ -32,10 +36,16 @@ class DefaultToolExecutorTest {
         override suspend fun delete(id: Long) {}
         override suspend fun touch(ids: List<Long>) {}
     }
+    private val researchOn = MutableStateFlow(true)
+    private val settings = object : SettingsStore {
+        override val blogId: Flow<String?> = flowOf(null)
+        override suspend fun setBlogId(id: String?) {}
+        override val researchEnabled: Flow<Boolean> get() = researchOn
+    }
 
     @Test
     fun searchReturnsHitsWithProgressAndLimits() = runTest {
-        val ex = DefaultToolExecutor(research, memory)
+        val ex = DefaultToolExecutor(research, memory, settings)
         val progress = mutableListOf<String>()
         val r = ex.execute("web_search", buildJsonObject { put("query", "원주 한우") }) { progress += it }
         assertEquals("원주 한우 맛집", r["results"]!!.jsonArray[0].jsonObject["title"]!!.jsonPrimitive.content)
@@ -47,10 +57,55 @@ class DefaultToolExecutorTest {
 
     @Test
     fun rememberStoresAndReportsAndUnknownToolErrors() = runTest {
-        val ex = DefaultToolExecutor(research, memory)
+        val ex = DefaultToolExecutor(research, memory, settings)
         val r = ex.execute("remember", buildJsonObject { put("kind", "PREFERENCE"); put("text", "가격은 정확히 적기") }) {}
         assertEquals(true, r["saved"]!!.jsonPrimitive.content.toBoolean())
         assertEquals(listOf(MemoryKind.PREFERENCE to "가격은 정확히 적기"), added)
         assertEquals("unknown tool", ex.execute("nope", buildJsonObject {}) {}["error"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun researchDisabledSkipsToolsWithoutProgressOrCounter() = runTest {
+        researchOn.value = false
+        val ex = DefaultToolExecutor(research, memory, settings)
+        val progress = mutableListOf<String>()
+        val search = ex.execute("web_search", buildJsonObject { put("query", "원주 한우") }) { progress += it }
+        assertEquals("disabled", search["error"]!!.jsonPrimitive.content)
+        val open = ex.execute("open_page", buildJsonObject { put("url", "https://blog.naver.com/x/1") }) { progress += it }
+        assertEquals("disabled", open["error"]!!.jsonPrimitive.content)
+        assertTrue(progress.isEmpty())
+
+        // 꺼져 있던 동안의 시도는 횟수를 안 썼으므로 다시 켜면 2회 그대로 쓸 수 있다.
+        researchOn.value = true
+        ex.execute("web_search", buildJsonObject { put("query", "a") }) {}
+        val second = ex.execute("web_search", buildJsonObject { put("query", "b") }) {}
+        assertTrue(second["results"] != null)
+    }
+
+    @Test
+    fun openPageOnlyAllowsUrlsFromThisTurnsSearch() = runTest {
+        val ex = DefaultToolExecutor(research, memory, settings)
+        val notAllowed = ex.execute("open_page", buildJsonObject { put("url", "https://blog.naver.com/x/1") }) {}
+        assertEquals("not_allowed", notAllowed["error"]!!.jsonPrimitive.content)
+
+        ex.execute("web_search", buildJsonObject { put("query", "원주 한우") }) {}
+        val allowed = ex.execute("open_page", buildJsonObject { put("url", "https://blog.naver.com/x/1") }) {}
+        assertEquals("제목", allowed["title"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun cancellationIsNotSwallowed() = runTest {
+        val cancellingResearch = object : ResearchTool {
+            override suspend fun search(query: String): List<SearchHit> = throw CancellationException("cancelled")
+            override suspend fun openPage(url: String): PageText? = null
+        }
+        val ex = DefaultToolExecutor(cancellingResearch, memory, settings)
+        var caught = false
+        try {
+            ex.execute("web_search", buildJsonObject { put("query", "x") }) {}
+        } catch (e: CancellationException) {
+            caught = true
+        }
+        assertTrue(caught)
     }
 }

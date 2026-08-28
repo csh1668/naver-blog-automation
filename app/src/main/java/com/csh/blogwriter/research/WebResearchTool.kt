@@ -3,6 +3,8 @@ package com.csh.blogwriter.research
 import android.content.Context
 import android.net.Uri
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -22,8 +24,13 @@ interface ResearchTool {
 @Singleton
 class WebResearchTool @Inject constructor(@ApplicationContext private val context: Context) : ResearchTool {
     private val hidden by lazy { HiddenWebView(context) }
-    private val script by lazy { context.assets.open("research_extract.js").bufferedReader().readText() }
+    @Volatile private var scriptCache: String? = null
     private val json = Json { ignoreUnknownKeys = true }
+
+    /** 에셋 읽기는 디스크 I/O 라 IO 디스패처에서 하고 결과를 캐시한다. */
+    private suspend fun script(): String = scriptCache ?: withContext(Dispatchers.IO) {
+        context.assets.open("research_extract.js").bufferedReader().readText()
+    }.also { scriptCache = it }
 
     override suspend fun search(query: String): List<SearchHit> {
         val q = Uri.encode(query)
@@ -34,13 +41,13 @@ class WebResearchTool @Inject constructor(@ApplicationContext private val contex
 
     override suspend fun openPage(url: String): PageText? {
         if (!url.startsWith("http")) return null
-        val raw = hidden.loadAndExtract(url, "$script; __research.pageText()", 10_000) ?: return null
+        val raw = hidden.loadAndExtract(url, "${script()}; __research.pageText()", 10_000) ?: return null
         val obj = runCatching { json.parseToJsonElement(unquote(raw)).jsonObject }.getOrNull() ?: return null
         return PageText(obj["title"]?.jsonPrimitive?.content.orEmpty(), obj["text"]?.jsonPrimitive?.content.orEmpty().take(4000))
     }
 
     private suspend fun extract(url: String, call: String, timeout: Long): List<SearchHit> {
-        val raw = hidden.loadAndExtract(url, "$script; $call", timeout) ?: return emptyList()
+        val raw = hidden.loadAndExtract(url, "${script()}; $call", timeout) ?: return emptyList()
         return runCatching {
             json.parseToJsonElement(unquote(raw)).jsonArray.map { it.jsonObject }.map { SearchHit(it["title"]!!.jsonPrimitive.content, it["url"]!!.jsonPrimitive.content, it["snippet"]?.jsonPrimitive?.content.orEmpty()) }
         }.getOrDefault(emptyList()).take(5)

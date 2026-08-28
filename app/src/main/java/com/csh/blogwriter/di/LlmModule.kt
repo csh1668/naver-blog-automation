@@ -4,13 +4,13 @@ import com.csh.blogwriter.chat.ConversationEngine
 import com.csh.blogwriter.chat.DefaultToolExecutor
 import com.csh.blogwriter.chat.PromptBuilder
 import com.csh.blogwriter.chat.ToolExecutor
+import com.csh.blogwriter.data.prefs.SettingsStore
 import com.csh.blogwriter.data.repo.MemoryRepository
 import com.csh.blogwriter.llm.AndroidKeystoreCipher
 import com.csh.blogwriter.llm.ApiKeyStore
 import com.csh.blogwriter.llm.GeminiClient
 import com.csh.blogwriter.llm.GeminiHttp
 import com.csh.blogwriter.llm.KeyRotator
-import com.csh.blogwriter.llm.ModelPolicy
 import com.csh.blogwriter.llm.SecretCipher
 import com.csh.blogwriter.research.ResearchTool
 import com.csh.blogwriter.research.WebResearchTool
@@ -36,17 +36,17 @@ abstract class LlmModule {
 
         @Provides @Singleton fun geminiClient(http: OkHttpClient): GeminiClient = GeminiClient(GeminiHttp.configure(http))
 
-        /** ModelPolicy 는 Task 9 에서 SettingsStore 값으로 교체한다. */
         @Provides @Singleton fun conversationEngine(
             client: GeminiClient,
             keyStore: ApiKeyStore,
             promptBuilder: PromptBuilder,
             memory: MemoryRepository,
+            settings: SettingsStore,
             tools: Provider<ToolExecutor>,
         ): ConversationEngine = ConversationEngine(
             client, keyStore,
             { keyIds, models -> KeyRotator(keyIds, models) { System.currentTimeMillis() } },
-            { ModelPolicy.DEFAULT }, promptBuilder, memory, { tools.get() },
+            { settings.modelPolicyOnce() }, promptBuilder, memory, { tools.get() },
         )
     }
 }
