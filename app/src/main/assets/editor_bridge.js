@@ -8,10 +8,23 @@ window.__app = (function () {
   function editor() { var w = frameWin(); var eds = w.SmartEditor && w.SmartEditor._editors; if (!eds) return null; var ids = Object.keys(eds); return ids.length ? eds[ids[0]] : null; }
   function uid() { return 'SE-' + (window.crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(16).slice(2)); }
 
+  // 바깥 페이지의 body 높이가 0 이라 #mainFrame 이 0px 로 렌더된다. 픽셀 높이를 직접 준다.
+  function fitFrame() {
+    try {
+      var d = document.documentElement, b = document.body;
+      if (d) d.style.height = '100%';
+      if (b) { b.style.height = '100%'; b.style.margin = '0'; }
+      var f = document.querySelector('#mainFrame');
+      if (!f) return;
+      f.style.height = window.innerHeight + 'px';
+      f.style.width = '100%';
+    } catch (e) { err('fit', e); }
+  }
+
   function checkReady() {
     try {
       var ed = editor();
-      if (ed && typeof ed.setDocumentData === 'function' && ed._videoUploadService && ed._videoUploadService._imageUploadService) { B.onReady(); return true; }
+      if (ed && typeof ed.setDocumentData === 'function' && ed._videoUploadService && ed._videoUploadService._imageUploadService) { fitFrame(); B.onReady(); return true; }
       return false;
     } catch (e) { err('ready', e); return false; }
   }
@@ -63,11 +76,13 @@ window.__app = (function () {
       var r = ed.setDocumentData(doc);
       Promise.resolve(r).then(function () {
         setTimeout(function () {
-          try { B.onInjected(ed.getDocumentData().document.components.length); } catch (e) { err('inject', e); }
+          try { fitFrame(); B.onInjected(ed.getDocumentData().document.components.length); } catch (e) { err('inject', e); }
         }, 800);
       }).catch(function (e) { err('inject', e); });
     } catch (e) { err('inject', e); }
   }
 
-  return { checkReady: checkReady, dismissPopups: dismissPopups, uploadImages: uploadImages, setDocument: setDocument, uid: uid };
+  try { window.addEventListener('resize', fitFrame); } catch (e) {}
+
+  return { checkReady: checkReady, dismissPopups: dismissPopups, uploadImages: uploadImages, setDocument: setDocument, fitFrame: fitFrame, uid: uid };
 })();
