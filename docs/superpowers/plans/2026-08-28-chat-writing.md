@@ -473,7 +473,9 @@ class KeyRotatorTest {
         r.report(p2, KeyRotator.Outcome.RATE_LIMITED)
         val p3 = r.next()!!; assertEquals("lite", p3.model)
         now += KeyRotator.KEY_COOLDOWN_MS + 1
-        assertEquals("flash", r.next()!!.model)   // 키 쿨다운 해제 → primary 복귀
+        assertEquals("lite", r.next()!!.model)    // 키 쿨다운은 풀렸지만 모델 쿨다운(10분)은 유지
+        now += KeyRotator.MODEL_COOLDOWN_MS
+        assertEquals("flash", r.next()!!.model)   // 모델 쿨다운 해제 → primary 복귀
     }
 
     @Test
