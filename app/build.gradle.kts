@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -5,6 +7,9 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
 }
+
+fun propOrNull(name: String): String? = rootProject.file("keystore.properties").takeIf { it.exists() }
+    ?.let { f -> Properties().apply { f.inputStream().use(::load) }.getProperty(name) }
 
 android {
     namespace = "com.csh.blogwriter"
@@ -19,11 +24,26 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            val ksPath = System.getenv("KEYSTORE_PATH") ?: rootProject.file("keystore.properties").takeIf { it.exists() }?.let { f ->
+                Properties().apply { f.inputStream().use(::load) }.getProperty("storeFile")
+            }
+            if (ksPath != null) {
+                storeFile = file(ksPath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: propOrNull("storePassword")
+                keyAlias = System.getenv("KEY_ALIAS") ?: propOrNull("keyAlias")
+                keyPassword = System.getenv("KEY_PASSWORD") ?: propOrNull("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
