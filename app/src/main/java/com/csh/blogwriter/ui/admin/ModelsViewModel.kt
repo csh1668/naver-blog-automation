@@ -8,6 +8,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -19,6 +20,7 @@ data class ModelsUiState(
     val maxLength: String = "",
     val loaded: Boolean = false,
     val saved: Boolean = false,
+    val error: String? = null,
 )
 
 @HiltViewModel
@@ -40,24 +42,30 @@ class ModelsViewModel @Inject constructor(private val settings: SettingsStore) :
         }
     }
 
-    fun onPrimaryModelChange(value: String) { _uiState.value = _uiState.value.copy(primaryModel = value, saved = false) }
-    fun onSecondaryModelChange(value: String) { _uiState.value = _uiState.value.copy(secondaryModel = value, saved = false) }
-    fun onTemperatureChange(value: String) { _uiState.value = _uiState.value.copy(temperature = value, saved = false) }
-    fun onMinLengthChange(value: String) { _uiState.value = _uiState.value.copy(minLength = value, saved = false) }
-    fun onMaxLengthChange(value: String) { _uiState.value = _uiState.value.copy(maxLength = value, saved = false) }
+    fun onPrimaryModelChange(value: String) { _uiState.update { it.copy(primaryModel = value, saved = false, error = null) } }
+    fun onSecondaryModelChange(value: String) { _uiState.update { it.copy(secondaryModel = value, saved = false, error = null) } }
+    fun onTemperatureChange(value: String) { _uiState.update { it.copy(temperature = value, saved = false, error = null) } }
+    fun onMinLengthChange(value: String) { _uiState.update { it.copy(minLength = value, saved = false, error = null) } }
+    fun onMaxLengthChange(value: String) { _uiState.update { it.copy(maxLength = value, saved = false, error = null) } }
 
     fun save() = viewModelScope.launch {
         val s = _uiState.value
-        val current = settings.modelPolicyOnce()
-        val models = listOfNotNull(
-            s.primaryModel.trim().takeIf { it.isNotEmpty() },
-            s.secondaryModel.trim().takeIf { it.isNotEmpty() },
-        ).ifEmpty { current.models }
-        val temperature = s.temperature.toDoubleOrNull()?.coerceIn(0.0, 1.0) ?: current.temperature
+        val primary = s.primaryModel.trim()
+        val secondary = s.secondaryModel.trim()
+        val temperature = s.temperature.toDoubleOrNull()
         val min = s.minLength.toIntOrNull()
         val max = s.maxLength.toIntOrNull()
-        val targetLength = if (min != null && max != null && min <= max) min..max else current.targetLength
-        settings.setModelPolicy(ModelPolicy(models = models, temperature = temperature, targetLength = targetLength))
-        _uiState.value = _uiState.value.copy(saved = true)
+
+        fun fail(message: String) { _uiState.update { it.copy(error = message, saved = false) } }
+        if (temperature == null) return@launch fail("온도는 숫자로 입력해 주세요")
+        if (temperature < 0.0 || temperature > 2.0) return@launch fail("온도는 0.0~2.0 사이여야 해요")
+        if (min == null || max == null) return@launch fail("글 길이는 숫자로 입력해 주세요")
+        if (min > max) return@launch fail("글 길이 최소가 최대보다 클 수 없어요")
+        if (min < 100) return@launch fail("글 길이 최소는 100자 이상이어야 해요")
+        if (primary.isEmpty() && secondary.isEmpty()) return@launch fail("모델을 하나 이상 입력해 주세요")
+
+        val models = listOfNotNull(primary.takeIf { it.isNotEmpty() }, secondary.takeIf { it.isNotEmpty() })
+        settings.setModelPolicy(ModelPolicy(models = models, temperature = temperature, targetLength = min..max))
+        _uiState.update { it.copy(saved = true, error = null) }
     }
 }

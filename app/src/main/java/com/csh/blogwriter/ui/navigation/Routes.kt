@@ -12,6 +12,7 @@ object Routes {
     @Serializable data object History
     @Serializable data object FailureLogs
     @Serializable data object Admin
+    @Serializable data object PinSetup
     @Serializable data object ApiKeys
     @Serializable data object Models
     @Serializable data object Prompts

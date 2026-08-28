@@ -21,11 +21,19 @@ class PinViewModel @Inject constructor(private val pinManager: PinManager) : Vie
     val uiState: StateFlow<PinUiState> = _uiState.asStateFlow()
 
     private var firstPin: String? = null
+    private var forceSet = false
 
     init {
         viewModelScope.launch {
-            _uiState.value = PinUiState(mode = if (pinManager.isSet()) PinMode.VERIFY else PinMode.SET_FIRST)
+            val isSet = pinManager.isSet()
+            _uiState.value = PinUiState(mode = if (forceSet || !isSet) PinMode.SET_FIRST else PinMode.VERIFY)
         }
+    }
+
+    /** PIN 변경 화면에서 호출한다. 기존 PIN 이 있어도 새로 두 번 입력받는 흐름으로 강제 진입한다. */
+    fun forceSetFlow() {
+        forceSet = true
+        _uiState.value = PinUiState(mode = PinMode.SET_FIRST)
     }
 
     fun submit(pin: String, onPassed: () -> Unit) {

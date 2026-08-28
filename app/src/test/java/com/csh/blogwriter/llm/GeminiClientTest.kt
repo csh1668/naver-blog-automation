@@ -63,8 +63,10 @@ class GeminiClientTest {
     @Test
     fun listModelsValidatesKey() = runTest {
         server.enqueue(MockResponse().setBody("""{"models":[]}"""))
-        assertTrue(client.listModels("k"))
+        assertEquals(KeyProbe.VALID, client.listModels("k"))
         assertEquals("/v1beta/models", server.takeRequest().path)
+        server.enqueue(MockResponse().setResponseCode(429).setBody("""{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"quota"}}"""))
+        assertEquals(KeyProbe.LIMITED, client.listModels("k"))
         server.enqueue(MockResponse().setResponseCode(403).setBody("""{"error":{"code":403,"status":"PERMISSION_DENIED","message":"denied"}}"""))
         try { client.listModels("k"); fail() } catch (e: GeminiException) { assertEquals(GeminiException.Kind.INVALID_KEY, e.kind) }
     }

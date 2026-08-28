@@ -84,11 +84,22 @@ fun AppNavHost() {
                     onPrompts = { nav.navigate(Routes.Prompts) },
                     onMemory = { nav.navigate(Routes.Memory) },
                     onFailureLogs = { nav.navigate(Routes.FailureLogs) },
-                    onPinChanged = { nav.navigate(Routes.Admin) { popUpTo(Routes.Admin) { inclusive = true } } },
+                    onChangePin = { nav.navigate(Routes.PinSetup) },
                     onLoggedOut = { nav.navigate(Routes.Home) { popUpTo(Routes.Home) { inclusive = true } } },
                     onBack = { nav.popBackStack() },
                 )
             }
+        }
+        composable<Routes.PinSetup> {
+            PinGateScreen(
+                forceSet = true,
+                onPassed = {
+                    // 확인 완료 후에는 Admin 으로 다시 들어가도 PIN 을 안 물어보도록, 원래의 Admin 백스택 엔트리에 통과 표시를 남기고 그리로 돌아간다.
+                    nav.getBackStackEntry(Routes.Admin).savedStateHandle[PIN_PASSED_KEY] = true
+                    nav.popBackStack()
+                },
+                onBack = { nav.popBackStack() },
+            )
         }
         composable<Routes.ApiKeys> { ApiKeysScreen(onBack = { nav.popBackStack() }) }
         composable<Routes.Models> { ModelsScreen(onBack = { nav.popBackStack() }) }

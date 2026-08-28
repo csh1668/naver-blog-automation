@@ -18,6 +18,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Test
 
@@ -25,13 +26,14 @@ import org.junit.Test
 class ApiKeysViewModelTest {
     private val server = MockWebServer()
     private val stored = MutableStateFlow<List<ApiKey>>(emptyList())
+    private val limitedIds = mutableListOf<String>()
     private val keyStore = object : ApiKeyStore {
         override val keys: Flow<List<ApiKey>> = stored
         override val hasUsableKey: Flow<Boolean> = stored.map { l -> l.any { it.usable } }
         override suspend fun add(secrets: List<String>): List<ApiKey> { val added = secrets.map { ApiKey(it, it, 0) }; stored.value = stored.value + added; return added }
         override suspend fun remove(id: String) { stored.value = stored.value.filterNot { it.id == id } }
         override suspend fun markOk(id: String) { stored.value = stored.value.map { if (it.id == id) it.copy(lastOkAt = 1) else it } }
-        override suspend fun markLimited(id: String) {}
+        override suspend fun markLimited(id: String) { limitedIds += id }
         override suspend fun markInvalid(id: String) {}
         override suspend fun resetAll() {}
     }
@@ -48,5 +50,22 @@ class ApiKeysViewModelTest {
         vm.register().join()
         assertEquals(listOf(Candidate.Status.VALID, Candidate.Status.INVALID), vm.uiState.value.candidates.map { it.status })
         assertEquals(1, stored.value.size); assertEquals(true, stored.value[0].usable)
+    }
+
+    @Test
+    fun rateLimitedCandidateIsStillAddedAndMarkedLimited() = runTest {
+        val vm = ApiKeysViewModel(keyStore, GeminiClient(OkHttpClient(), server.url("/").toString().trimEnd('/')))
+        vm.onInput("AQ.Ab8RN6limitedlimitedlimitedlimited")
+        server.enqueue(MockResponse().setResponseCode(429).setBody("""{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"quota"}}"""))
+        vm.register().join()
+        assertEquals(listOf(Candidate.Status.LIMITED), vm.uiState.value.candidates.map { it.status })
+        assertEquals(1, stored.value.size)
+        assertEquals(listOf(stored.value[0].id), limitedIds)
+    }
+
+    @Test
+    fun candidateToStringDoesNotLeakSecret() {
+        val candidate = Candidate("AQ.Ab8RN6superSecretValueNotToLeak", Candidate.Status.VALID)
+        assertFalse(candidate.toString().contains(candidate.secret))
     }
 }

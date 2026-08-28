@@ -54,7 +54,6 @@ class SettingsViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
     fun setResearchEnabled(enabled: Boolean) = viewModelScope.launch { settings.setResearchEnabled(enabled) }
-    fun resetPin() = viewModelScope.launch { settings.setPinHash(null) }
     fun logout(onDone: () -> Unit) = viewModelScope.launch { naverSession.logout(); onDone() }
 }
 
@@ -66,7 +65,7 @@ fun SettingsScreen(
     onPrompts: () -> Unit,
     onMemory: () -> Unit,
     onFailureLogs: () -> Unit,
-    onPinChanged: () -> Unit,
+    onChangePin: () -> Unit,
     onLoggedOut: () -> Unit,
     onBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
@@ -88,7 +87,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(AppSpacing.md))
         ListRow(title = "실패 로그", onClick = onFailureLogs)
         Spacer(Modifier.height(AppSpacing.md))
-        ListRow(title = "PIN 변경", onClick = { viewModel.resetPin(); onPinChanged() })
+        ListRow(title = "PIN 변경", onClick = onChangePin)
         Spacer(Modifier.height(AppSpacing.md))
         ListRow(title = "네이버 로그아웃", onClick = { logoutConfirm = true }, trailingChevron = false)
     }

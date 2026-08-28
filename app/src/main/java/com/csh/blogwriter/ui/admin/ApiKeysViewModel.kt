@@ -7,6 +7,7 @@ import com.csh.blogwriter.llm.ApiKeyParser
 import com.csh.blogwriter.llm.ApiKeyStore
 import com.csh.blogwriter.llm.GeminiClient
 import com.csh.blogwriter.llm.GeminiException
+import com.csh.blogwriter.llm.KeyProbe
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +19,9 @@ import javax.inject.Inject
 data class Candidate(val secret: String, val status: Status) {
     enum class Status { PENDING, VALID, INVALID, LIMITED, ERROR }
     val masked: String get() = "…" + secret.takeLast(4)
+
+    /** 실수로 로그에 찍혀도 secret 이 노출되지 않도록. */
+    override fun toString() = "Candidate(masked=$masked, status=$status)"
 }
 
 data class ApiKeysUiState(val keys: List<ApiKey> = emptyList(), val candidates: List<Candidate> = emptyList(), val busy: Boolean = false)
@@ -46,13 +50,12 @@ class ApiKeysViewModel @Inject constructor(private val keyStore: ApiKeyStore, pr
         _uiState.update { it.copy(busy = true) }
         val results = _uiState.value.candidates.map { c ->
             val status = try {
-                if (client.listModels(c.secret)) Candidate.Status.VALID else Candidate.Status.ERROR
-            } catch (e: GeminiException) {
-                when (e.kind) {
-                    GeminiException.Kind.INVALID_KEY -> Candidate.Status.INVALID
-                    GeminiException.Kind.RATE_LIMITED -> Candidate.Status.LIMITED
-                    else -> Candidate.Status.ERROR
+                when (client.listModels(c.secret)) {
+                    KeyProbe.VALID -> Candidate.Status.VALID
+                    KeyProbe.LIMITED -> Candidate.Status.LIMITED
                 }
+            } catch (e: GeminiException) {
+                if (e.kind == GeminiException.Kind.INVALID_KEY) Candidate.Status.INVALID else Candidate.Status.ERROR
             }
             c.copy(status = status)
         }

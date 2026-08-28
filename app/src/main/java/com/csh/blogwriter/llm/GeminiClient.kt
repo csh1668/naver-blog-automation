@@ -14,6 +14,9 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 
+/** `listModels` 로 키를 검증한 결과. LIMITED 도 실존하는 키라는 뜻이다(429 = 한도 초과일 뿐 키 자체는 유효). */
+enum class KeyProbe { VALID, LIMITED }
+
 /** Gemini REST (`v1beta` generateContent). 키는 헤더로만 보내고 어디에도 기록하지 않는다. */
 class GeminiClient(
     private val http: OkHttpClient,
@@ -56,9 +59,9 @@ class GeminiClient(
         return GeminiException(code, err?.get("status")?.jsonPrimitive?.content, err?.get("message")?.jsonPrimitive?.content ?: text.take(200))
     }
 
-    suspend fun listModels(apiKey: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun listModels(apiKey: String): KeyProbe = withContext(Dispatchers.IO) {
         val req = Request.Builder().url("$baseUrl/v1beta/models").header("x-goog-api-key", apiKey).get().build()
-        try { execute(req); true } catch (e: GeminiException) { if (e.kind == GeminiException.Kind.RATE_LIMITED) true else throw e }
+        try { execute(req); KeyProbe.VALID } catch (e: GeminiException) { if (e.kind == GeminiException.Kind.RATE_LIMITED) KeyProbe.LIMITED else throw e }
     }
 
     private fun execute(req: Request): String {

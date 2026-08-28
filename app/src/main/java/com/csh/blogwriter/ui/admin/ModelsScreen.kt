@@ -34,7 +34,7 @@ fun ModelsScreen(onBack: () -> Unit, viewModel: ModelsViewModel = hiltViewModel(
         AppTextField(value = state.secondaryModel, onValueChange = viewModel::onSecondaryModelChange, label = "대체 모델")
         Spacer(Modifier.height(AppSpacing.lg))
         AppTextField(
-            value = state.temperature, onValueChange = viewModel::onTemperatureChange, label = "온도 (0.0~1.0)",
+            value = state.temperature, onValueChange = viewModel::onTemperatureChange, label = "온도 (0.0~2.0)",
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
         )
         Spacer(Modifier.height(AppSpacing.lg))
@@ -51,7 +51,11 @@ fun ModelsScreen(onBack: () -> Unit, viewModel: ModelsViewModel = hiltViewModel(
                 modifier = Modifier.weight(1f),
             )
         }
-        if (state.saved) {
+        val error = state.error
+        if (error != null) {
+            Spacer(Modifier.height(AppSpacing.lg))
+            InlineBanner(error, BannerKind.Danger)
+        } else if (state.saved) {
             Spacer(Modifier.height(AppSpacing.lg))
             InlineBanner("저장했어요", BannerKind.Success)
         }
