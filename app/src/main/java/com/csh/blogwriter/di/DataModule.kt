@@ -1,5 +1,7 @@
 package com.csh.blogwriter.di
 
+import com.csh.blogwriter.chat.AssetPromptStore
+import com.csh.blogwriter.chat.PromptStore
 import com.csh.blogwriter.data.prefs.DataStoreSettingsStore
 import com.csh.blogwriter.data.prefs.SettingsStore
 import com.csh.blogwriter.data.repo.*
@@ -25,6 +27,7 @@ abstract class DataModule {
     @Binds @Singleton abstract fun memoryRepository(impl: RoomMemoryRepository): MemoryRepository
     @Binds @Singleton abstract fun settingsStore(impl: DataStoreSettingsStore): SettingsStore
     @Binds @Singleton abstract fun apiKeyStore(impl: DataStoreApiKeyStore): ApiKeyStore
+    @Binds @Singleton abstract fun promptStore(impl: AssetPromptStore): PromptStore
     @Binds abstract fun imagePreparing(impl: ImagePreparer): ImagePreparing
 
     companion object {
