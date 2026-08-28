@@ -256,27 +256,35 @@ class ConversationEngineTest {
 
     @Test
     fun repeatedServerErrorsGiveUpEveryModelAndFailWithServer() = runTest {
-        // 503 이 계속되면: 같은 pick 재시도 1회 → flash 접음 → lite 재시도 → lite 도 접음 → SERVER 실패.
+        // 503 이 계속되면: flash 접음 → lite → lite 도 접음 → SERVER 실패. 요청은 모델당 1번뿐(한도 절약).
         repeat(12) { server.enqueue(error(503, "UNAVAILABLE")) }
         val r = engine.runTurn(ctx(), Recorder()) as TurnResult.Failure
         assertEquals(TurnResult.Reason.SERVER, r.reason)
         val paths = (0 until server.requestCount).map { server.takeRequest().path!! }
-        assertTrue(paths.size in 3..4)
+        assertEquals(2, paths.size)
         assertTrue(paths.any { it.contains("lite:streamGenerateContent") })
     }
 
     @Test
-    fun serverOverloadFallsBackToNextModel() = runTest {
-        // 503 두 번(원래 + 무료 재시도) 뒤에는 키를 돌리지 않고 대체 모델로 내려간다.
-        server.enqueue(error(503, "UNAVAILABLE"))
+    fun serverOverloadFallsBackToNextModelWithoutRetry() = runTest {
+        // 503(과부하)은 재시도도 하지 않는다 — 거절된 요청도 일일 한도에서 빠지므로 바로 대체 모델로.
         server.enqueue(error(503, "UNAVAILABLE"))
         server.enqueue(textResponse("""{"say":"라이트로 갔어요","quickReplies":[],"readyToDraft":false}"""))
         val r = engine.runTurn(ctx(), Recorder()) as TurnResult.Success
         assertEquals("lite", r.usedModel)
-        assertEquals(3, server.requestCount)
-        assertTrue(server.takeRequest().path!!.contains("flash:streamGenerateContent"))
+        assertEquals(2, server.requestCount)
         assertTrue(server.takeRequest().path!!.contains("flash:streamGenerateContent"))
         assertTrue(server.takeRequest().path!!.contains("lite:streamGenerateContent"))
+    }
+
+    @Test
+    fun otherServerErrorsStillGetOneRetryBeforeFallingBack() = runTest {
+        server.enqueue(error(500, "INTERNAL"))
+        server.enqueue(error(500, "INTERNAL"))
+        server.enqueue(textResponse("""{"say":"라이트로 갔어요","quickReplies":[],"readyToDraft":false}"""))
+        val r = engine.runTurn(ctx(), Recorder()) as TurnResult.Success
+        assertEquals("lite", r.usedModel)
+        assertEquals(3, server.requestCount)
     }
 
     @Test

@@ -122,8 +122,10 @@ class ConversationEngine(
                         else rot.report(pick, KeyRotator.Outcome.TRANSIENT)
                     // 5xx(503 과부하 등)는 키가 아니라 모델 쪽 문제 — 같은 pick 으로 한 번만 더 해 보고,
                     // 그래도 안 되면 이 모델을 이번 턴에서 접고 대체 모델로 내려간다(키만 바꿔 가며 같은 모델을 두드리지 않는다).
+                    // 503(과부하)은 몇 분씩 이어지고, 거절된 요청도 일일 한도(RPD)에서 차감된다 — 재시도 없이 바로 모델을 접는다.
+                    // 그 밖의 5xx 는 일시적일 수 있으니 같은 pick 으로 한 번만 더.
                     GeminiException.Kind.SERVER ->
-                        if (!transientRetried) { transientRetried = true; attempts-- }
+                        if (e.code != 503 && !transientRetried) { transientRetried = true; attempts-- }
                         else { deadModels += pick.model; rot.report(pick, KeyRotator.Outcome.SERVER_ERROR) }
                 }
             } catch (e: BadResponse) {
