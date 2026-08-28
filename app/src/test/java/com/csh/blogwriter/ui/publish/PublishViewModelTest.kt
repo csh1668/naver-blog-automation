@@ -113,6 +113,13 @@ class PublishViewModelTest {
         assertNull(pending.value)
     }
 
+    /** 갤러리 Uri 권한은 프로세스가 죽으면 사라지므로, 준비가 끝나면 바로 로컬 파일 경로를 남겨 재개할 수 있어야 한다. */
+    @Test
+    fun savesPreparedPathsRightAfterPreparing() = runTest {
+        val vm = vm(); vm.attach(FakeController()); runCurrent()
+        assertEquals(listOf(File("/tmp/img.jpg").absolutePath), pending.value!!.preparedPaths)
+    }
+
     @Test
     fun loginRedirectSavesPendingAndSignalsSessionExpired() = runTest {
         val vm = vm(); val c = FakeController()

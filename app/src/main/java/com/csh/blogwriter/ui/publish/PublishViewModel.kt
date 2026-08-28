@@ -153,10 +153,7 @@ class PublishViewModel @Inject constructor(
                 pendingJobs.delete(j.id)
                 preparer.clear(j.id)
             }
-            PublishEffect.SavePending -> viewModelScope.launch {
-                pendingJobs.setPreparedPaths(jobId, images.map { it.file.absolutePath }.takeIf { it.isNotEmpty() })
-                _navigation.emit(PublishNav.SessionExpired(jobId))
-            }
+            PublishEffect.SavePending -> viewModelScope.launch { _navigation.emit(PublishNav.SessionExpired(jobId)) }
             is PublishEffect.LogFailure -> viewModelScope.launch {
                 failures.add(effect.stage.name, effect.message, "url=${_uiState.value.lastUrl}")
                 pendingJobs.setLastFailure(jobId, "${effect.stage.name}: ${effect.message}")
@@ -175,6 +172,8 @@ class PublishViewModel @Inject constructor(
         } catch (e: Exception) {
             dispatch(PublishEvent.JsError(PublishStage.PREPARE, "사진 준비 실패: ${e.message}")); return
         }
+        // 갤러리 Uri 권한은 프로세스가 죽으면 사라진다. 준비된 로컬 파일 경로를 바로 남겨야 나중에 이어서 올릴 수 있다.
+        pendingJobs.setPreparedPaths(j.id, images.map { it.file.absolutePath }.takeIf { it.isNotEmpty() })
         controller?.setLocalImages(images)
         dispatch(PublishEvent.ImagesPrepared)
     }
