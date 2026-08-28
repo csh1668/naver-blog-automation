@@ -93,7 +93,7 @@ class PublishStateMachineTest {
     }
 
     @Test
-    fun jsErrorInReviewIsIgnoredButOtherUrlsInReviewAreIgnoredToo() {
+    fun reviewingIgnoresNonPublishedUrlsButLoginUrlExpires() {
         val m = machine(images = 0, components = 2)
         val reviewing = m.run(
             PublishEvent.Start, PublishEvent.ImagesPrepared, PublishEvent.PageLoaded("u"), PublishEvent.EditorReady,
@@ -105,12 +105,44 @@ class PublishStateMachineTest {
     }
 
     @Test
+    fun jsErrorFailsWithStageAndLogs() {
+        val t = machine().run(
+            PublishEvent.Start, PublishEvent.ImagesPrepared, PublishEvent.PageLoaded("u"), PublishEvent.EditorReady,
+            PublishEvent.PopupsDismissed, PublishEvent.JsError(PublishStage.DISMISS_POPUPS, "boom"),
+        )
+        val failed = t.last().state as PublishState.Failed
+        assertEquals(PublishStage.DISMISS_POPUPS, failed.stage)
+        assertEquals("boom", failed.message)
+        assertEquals(listOf(PublishEffect.LogFailure(PublishStage.DISMISS_POPUPS, "boom")), t.last().effects)
+
+        // JsError from Reviewing is NOT ignored
+        val m = machine(images = 0, components = 2)
+        val reviewing = m.run(
+            PublishEvent.Start, PublishEvent.ImagesPrepared, PublishEvent.PageLoaded("u"), PublishEvent.EditorReady,
+            PublishEvent.PopupsDismissed, PublishEvent.Injected(2),
+        ).last().state
+        assertEquals(PublishState.Reviewing, reviewing)
+        val failedFromReview = m.reduce(reviewing, PublishEvent.JsError(PublishStage.INJECT, "error")).state as PublishState.Failed
+        assertEquals(PublishStage.INJECT, failedFromReview.stage)
+    }
+
+    @Test
+    fun retryFromSessionExpiredRestarts() {
+        val m = machine()
+        val t = m.reduce(PublishState.SessionExpired, PublishEvent.Retry)
+        assertEquals(PublishState.PreparingImages(0, 2), t.state)
+        assertEquals(listOf(PublishEffect.PrepareImages), t.effects)
+    }
+
+    @Test
     fun terminalStatesIgnoreFurtherEvents() {
         val m = machine()
         val failed = PublishState.Failed(PublishStage.UPLOAD, "x")
         assertEquals(Transition(failed, emptyList()), m.reduce(failed, PublishEvent.EditorReady))
         val published = PublishState.Published("1", "u")
         assertEquals(Transition(published, emptyList()), m.reduce(published, PublishEvent.UrlChanged(loginUrl)))
+        // Retry on Published is ignored
+        assertEquals(Transition(published, emptyList()), m.reduce(published, PublishEvent.Retry))
     }
 
     @Test
