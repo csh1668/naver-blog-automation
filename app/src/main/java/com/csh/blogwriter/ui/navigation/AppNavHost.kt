@@ -11,12 +11,14 @@ import com.csh.blogwriter.ui.admin.ApiKeysScreen
 import com.csh.blogwriter.ui.admin.FailureLogScreen
 import com.csh.blogwriter.ui.admin.ModelsScreen
 import com.csh.blogwriter.ui.admin.PinGateScreen
+import com.csh.blogwriter.ui.admin.PromptsScreen
 import com.csh.blogwriter.ui.admin.SettingsScreen
 import com.csh.blogwriter.ui.compose.TestComposeScreen
 import com.csh.blogwriter.ui.fallback.FallbackScreen
 import com.csh.blogwriter.ui.history.HistoryScreen
 import com.csh.blogwriter.ui.home.HomeScreen
 import com.csh.blogwriter.ui.login.LoginScreen
+import com.csh.blogwriter.ui.memory.MemoryScreen
 import com.csh.blogwriter.ui.publish.PublishScreen
 
 private const val PIN_PASSED_KEY = "pin_passed"
@@ -103,5 +105,7 @@ fun AppNavHost() {
         }
         composable<Routes.ApiKeys> { ApiKeysScreen(onBack = { nav.popBackStack() }) }
         composable<Routes.Models> { ModelsScreen(onBack = { nav.popBackStack() }) }
+        composable<Routes.Prompts> { PromptsScreen(onBack = { nav.popBackStack() }) }
+        composable<Routes.Memory> { MemoryScreen(onBack = { nav.popBackStack() }) }
     }
 }
