@@ -1,8 +1,11 @@
 package com.csh.blogwriter.llm
 
+import java.time.Instant
+import java.time.ZoneId
+
 /**
  * 키·모델 선택 정책 (spec §4.3). 상태는 메모리에만 두며 앱 재시작 시 초기화된다(쿨다운은 짧고, 일일 상한은 보수적 회피용).
- * 순수 Kotlin — 시계는 주입.
+ * 순수 Kotlin — 시계는 주입. 일일 상한 리셋은 태평양 시간 자정 기준.
  */
 class KeyRotator(keyIds: List<String>, private val models: List<String>, private val clock: () -> Long) {
     data class Pick(val keyId: String, val model: String)
@@ -30,7 +33,11 @@ class KeyRotator(keyIds: List<String>, private val models: List<String>, private
             val key = order.firstOrNull()
             if (key != null) return Pick(key.id, model)
 
-            // No non-cooldown key found; try any non-disabled key as last resort
+            // No non-cooldown key found for this model; try any non-disabled key as last resort.
+            // Per-model quotas justify this: if all keys on a model are in cooldown but the model itself
+            // is not on model-cooldown (hasn't hit the exhaustion threshold yet), we allow falling back
+            // to a cooled key rather than skipping the entire model. This deviates from the brief's
+            // pseudocode but is necessary for correct per-model rate-limit handling.
             val anyKey = (keys.indices).map { keys[(startIndex + it) % keys.size] }
                 .filter { !it.disabled }
                 .sortedBy { if (it.successesToday >= DAILY_CAP) 1 else 0 }
@@ -62,7 +69,7 @@ class KeyRotator(keyIds: List<String>, private val models: List<String>, private
     fun disabledKeys(): Set<String> = keys.filter { it.disabled }.map { it.id }.toSet()
 
     private fun rollDay(now: Long) {
-        val day = now / 86_400_000L
+        val day = Instant.ofEpochMilli(now).atZone(ZoneId.of("America/Los_Angeles")).toLocalDate().toEpochDay()
         keys.forEach { if (it.dayStamp != day) { it.dayStamp = day; it.successesToday = 0 } }
     }
 }

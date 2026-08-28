@@ -1,5 +1,7 @@
 package com.csh.blogwriter.llm
 
+import java.time.ZoneId
+import java.time.ZonedDateTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -57,5 +59,35 @@ class KeyRotatorTest {
         repeat(KeyRotator.DAILY_CAP) { val p = r.next()!!; assertEquals("k1", p.keyId); r.report(p, KeyRotator.Outcome.SUCCESS); r.report(r.next()!!, KeyRotator.Outcome.SUCCESS) }
         // k1, k2 모두 20회 성공 → 둘 다 하루 상한 → 그래도 null 이 아니라 상한 키를 마지막 순위로 시도한다
         assertEquals("k1", r.next()!!.keyId)
+    }
+
+    @Test
+    fun dailyCapResetsAtPacificMidnight() {
+        // 2026-08-27 23:59 PDT (2026-08-28 06:59 UTC)
+        now = ZonedDateTime.of(2026, 8, 27, 23, 59, 0, 0, ZoneId.of("America/Los_Angeles")).toInstant().toEpochMilli()
+        val r = rotator(keys = listOf("k1", "k2"), models = listOf("flash"))
+
+        // Drive k1 to daily cap (20 successes) by always reporting SUCCESS for k1 and TRANSIENT for k2
+        repeat(KeyRotator.DAILY_CAP) {
+            val p = r.next()!!
+            if (p.keyId == "k1") {
+                r.report(p, KeyRotator.Outcome.SUCCESS)
+                // Get k2 and report TRANSIENT to avoid capping it
+                val p2 = r.next()!!
+                assertEquals("k2", p2.keyId)
+                r.report(p2, KeyRotator.Outcome.TRANSIENT)
+            }
+        }
+
+        // After capping k1, next() should return k2 (k1 demoted)
+        val afterCap = r.next()!!
+        assertEquals("k2", afterCap.keyId)
+
+        // Move to Pacific midnight (2026-08-28 00:01 PDT = 07:01 UTC)
+        now = ZonedDateTime.of(2026, 8, 28, 0, 1, 0, 0, ZoneId.of("America/Los_Angeles")).toInstant().toEpochMilli()
+
+        // After Pacific midnight, daily cap should reset; next() should return k1 again
+        val afterReset = r.next()!!
+        assertEquals("k1", afterReset.keyId)
     }
 }
