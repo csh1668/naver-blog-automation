@@ -16,11 +16,14 @@ class PromptBuilder @Inject constructor(private val store: PromptStore) {
             add(store.text(PromptSection.AUDIENCE))
             add(store.text(PromptSection.STYLE).replace("{{style}}", style ?: "(아직 없음)"))
             add(store.text(PromptSection.MEMORY).replace("{{memory}}", memoryLines))
-            add(store.text(PromptSection.STRUCTURE).replace("{{minLen}}", targetLength.first.toString()).replace("{{maxLen}}", targetLength.last.toString()))
+            add(store.text(PromptSection.STRUCTURE))
             add(store.text(PromptSection.CONVERSATION))
             add(store.text(PromptSection.OUTPUT))
             if (draftTurn) add(store.text(PromptSection.SELFCHECK))
         }
+        // 길이 자리표시자는 어느 섹션에 있든(구조·자기점검·관리자가 편집한 곳) 모두 채운다.
         return sections.joinToString("\n\n")
+            .replace("{{minLen}}", targetLength.first.toString())
+            .replace("{{maxLen}}", targetLength.last.toString())
     }
 }

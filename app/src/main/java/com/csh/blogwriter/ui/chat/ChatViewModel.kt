@@ -423,9 +423,14 @@ class ChatViewModel @Inject constructor(
         return if (issues.isEmpty()) null else DraftGate(post, issues, asks.joinToString(" "))
     }
 
-    /** 본문 글자 수 — 제목과 공백은 빼고 문단 글자만 센다. */
-    private fun bodyLength(post: PostContent): Int = post.blocks.filterIsInstance<Block.Paragraph>()
-        .sumOf { block -> block.runs.sumOf { run -> run.text.count { !it.isWhitespace() } } }
+    /** 본문 글자 수 — 제목과 공백은 빼고 문단·인용구(소제목) 글자를 센다. */
+    private fun bodyLength(post: PostContent): Int = post.blocks.sumOf { block ->
+        when (block) {
+            is Block.Paragraph -> block.runs.sumOf { run -> run.text.count { !it.isWhitespace() } }
+            is Block.Quote -> block.text.count { !it.isWhitespace() }
+            else -> 0
+        }
+    }
 
     private fun refs(repairs: List<String>, prefix: String): String =
         repairs.filter { it.startsWith(prefix) }.joinToString(", ") { it.removePrefix(prefix) }
