@@ -15,6 +15,8 @@ window.__research = window.__research || (function () {
     for (var i = 0; i < anchors.length && out.length < limit; i++) {
       var a = anchors[i]; var href = a.href || ''; if (!href || seen[href]) continue;
       var h = host(href); if (!h || SKIP_HOST.test(h)) continue;
+      // m.help.pay.naver.com 같은 도움말·결제·로그인·광고 하위 도메인
+      if (/(^|\.)(help|pay|nid|ader|adcr|keep)\.[a-z.]*naver\.com$/.test(h)) continue;
       if (!visible(a)) continue;
       var title = txt(a);
       if (title.length < 6 || title.length > 120) continue;
