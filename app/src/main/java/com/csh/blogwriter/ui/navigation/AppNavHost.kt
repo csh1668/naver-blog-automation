@@ -7,6 +7,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.csh.blogwriter.ui.admin.FailureLogScreen
+import com.csh.blogwriter.ui.compose.TestComposeScreen
 import com.csh.blogwriter.ui.history.HistoryScreen
 import com.csh.blogwriter.ui.home.HomeScreen
 import com.csh.blogwriter.ui.login.LoginScreen
@@ -37,7 +38,12 @@ fun AppNavHost() {
                 },
             )
         }
-        composable<Routes.TestCompose> { Text("준비 중: 글쓰기") }
+        composable<Routes.TestCompose> {
+            TestComposeScreen(
+                onBack = { nav.popBackStack() },
+                onPublish = { id -> nav.navigate(Routes.Publish(id)) { popUpTo(Routes.Home) } },
+            )
+        }
         composable<Routes.Publish> { Text("준비 중: 발행 " + it.toRoute<Routes.Publish>().jobId) }
         composable<Routes.Fallback> { Text("준비 중: 폴백 " + it.toRoute<Routes.Fallback>().jobId) }
         composable<Routes.History> { HistoryScreen(onBack = { nav.popBackStack() }) }
