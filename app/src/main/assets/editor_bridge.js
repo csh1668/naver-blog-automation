@@ -4,6 +4,7 @@ window.__app = (function () {
   var B = window.AndroidBridge;
   var DRAFT_TEXT = '작성 중인 글이 있습니다';
   var DRAFT_POLL_MS = 300, DRAFT_MAX_MS = 60000;
+  var POPUP_SELECTOR = '[role="dialog"], .se-popup, .__se-pop-layer';
   var draftTimer = null, readyReported = false;
   function log(m) { try { B.log(String(m)); } catch (e) {} }
   function err(step, e) { try { B.onError(step, (e && (e.stack || e.message)) || (function () { try { return JSON.stringify(e); } catch (_) { return String(e); } })()); } catch (_) {} }
@@ -62,26 +63,19 @@ window.__app = (function () {
     }
     return false;
   }
-  // phrase 를 담은 가장 깊은(문서 순서상 마지막) 보이는 요소.
-  function deepestWithText(doc, phrase) {
-    var all = doc.querySelectorAll('body *'), hit = null;
-    for (var i = 0; i < all.length; i++) {
-      var el = all[i];
-      if ((el.textContent || '').indexOf(phrase) === -1) continue;
-      if (!visible(el)) continue;
-      hit = el;
-    }
-    return hit;
-  }
   // "작성 중인 글이 있습니다" 다이얼로그 → 취소(기존 임시저장 글 불러오지 않음). 성공하면 true.
-  // 문구를 담은 노드에서 조상을 하나씩 올라가며 "취소" 버튼을 가진 첫 조상 안에서만 누른다.
+  // 팝업 컨테이너를 먼저 찾고 그 안에서만 문구와 "취소" 를 찾는다. 컨테이너 밖은 절대 누르지 않는다.
+  // (문구 노드에서 조상을 거슬러 올라가면 다이얼로그를 벗어나 엉뚱한 "취소" 를 누를 수 있다.)
   function dismissDraftDialog() {
     var doc = frameDoc();
     if (!doc) return false;
-    var text = deepestWithText(doc, DRAFT_TEXT);
-    if (!text) return false;
-    for (var p = text.parentElement, i = 0; p && i < 8; p = p.parentElement, i++) {
-      if (clickInside(p, '취소')) return true;
+    // 팝업이 없는 동안(폴링의 대부분)은 여기서 끝난다. 문서 전체를 훑지 않는다.
+    var roots = doc.querySelectorAll(POPUP_SELECTOR);
+    for (var i = 0; i < roots.length; i++) {
+      var root = roots[i];
+      if (!visible(root)) continue;
+      if ((root.textContent || '').indexOf(DRAFT_TEXT) === -1) continue;
+      return clickInside(root, '취소');
     }
     return false;
   }
