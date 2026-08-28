@@ -43,16 +43,22 @@ class WebResearchTool @Inject constructor(@ApplicationContext private val contex
     override suspend fun searchDetailed(query: String): SearchResult {
         val q = Uri.encode(query)
         val started = System.currentTimeMillis()
-        // 통합검색(nexearch): 플레이스 카드(영업시간·주소·전화)가 결과 페이지 요약에 바로 들어온다.
-        val naver = extract("https://search.naver.com/search.naver?where=nexearch&query=$q", "__research.searchNaver()", 8_000)
-        if (naver.hits.isNotEmpty() || naver.summary.length >= 200) {
-            Log.d(TAG, "naver search hits=${naver.hits.size} summary=${naver.summary.length}c ${System.currentTimeMillis() - started}ms")
-            return naver
-        }
-        val google = extract("https://www.google.com/search?hl=ko&q=$q", "__research.searchGoogle()", 8_000)
-        Log.d(TAG, "google fallback hits=${google.hits.size} summary=${google.summary.length}c ${System.currentTimeMillis() - started}ms")
-        return google
+        fun good(r: SearchResult) = r.hits.isNotEmpty() || r.summary.length >= 200
+        // 1) 네이버 모바일 통합검색: PC 페이지보다 훨씬 가볍고 플레이스 카드(영업시간·주소·전화)가 요약에 바로 들어온다.
+        val mobile = extract("https://m.search.naver.com/search.naver?where=m&query=$q", "__research.searchNaver()", 15_000)
+        if (good(mobile)) return mobile.also { Log.d(TAG, "naver(m) hits=${it.hits.size} summary=${it.summary.length}c ${System.currentTimeMillis() - started}ms") }
+        // 2) 네이버 PC 통합검색
+        val pc = extract("https://search.naver.com/search.naver?where=nexearch&query=$q", "__research.searchNaver()", 15_000)
+        if (good(pc)) return pc.also { Log.d(TAG, "naver(pc) hits=${it.hits.size} summary=${it.summary.length}c ${System.currentTimeMillis() - started}ms") }
+        // 3) 빙: 구글은 집 회선에서도 자동 트래픽으로 보고 보안문자 페이지를 내놓아 쓸 수 없다.
+        val bing = extract("https://www.bing.com/search?setlang=ko&q=$q", "__research.searchBing()", 12_000)
+        Log.d(TAG, "bing fallback hits=${bing.hits.size} summary=${bing.summary.length}c ${System.currentTimeMillis() - started}ms")
+        return bing
     }
+
+    /** 보안문자·차단 페이지는 결과가 아니다. */
+    private fun looksBlocked(summary: String): Boolean =
+        summary.contains("비정상적인 트래픽") || summary.contains("unusual traffic") || summary.contains("보안문자") || summary.contains("captcha", ignoreCase = true)
 
     override suspend fun openPage(url: String): PageText? {
         // "httpx://…" 같은 것도 startsWith("http") 를 통과한다 — 스킴을 제대로 본다.
@@ -73,7 +79,9 @@ class WebResearchTool @Inject constructor(@ApplicationContext private val contex
             val hits = obj["hits"]?.jsonArray.orEmpty().map { it.jsonObject }
                 .map { SearchHit(it["title"]!!.jsonPrimitive.content, it["url"]!!.jsonPrimitive.content, it["snippet"]?.jsonPrimitive?.content.orEmpty()) }
                 .take(6)
-            SearchResult(hits, obj["summary"]?.jsonPrimitive?.content.orEmpty().take(1800))
+            val summary = obj["summary"]?.jsonPrimitive?.content.orEmpty().take(1800)
+            if (looksBlocked(summary)) { Log.w(TAG, "search page looks blocked (captcha): ${runCatching { java.net.URI(url).host }.getOrNull()}"); empty }
+            else SearchResult(hits, summary)
         }.getOrElse { e -> Log.w(TAG, "search extract parse failed: ${e.javaClass.simpleName}"); empty }
     }
 
