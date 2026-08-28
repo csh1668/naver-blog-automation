@@ -27,6 +27,7 @@ class LoginViewModel @Inject constructor(private val settings: SettingsStore) : 
     val phase: StateFlow<LoginPhase> = _phase
     private val _urlToLoad = MutableStateFlow(NaverWebViewConfig.LOGIN_URL)
     val urlToLoad: StateFlow<String> = _urlToLoad
+    private var resolving = false
 
     fun onUrlChanged(url: String) {
         when (val p = _phase.value) {
@@ -36,9 +37,14 @@ class LoginViewModel @Inject constructor(private val settings: SettingsStore) : 
             }
             LoginPhase.ResolvingBlogId -> {
                 if (PublishUrlParser.isLoginPage(url)) { _phase.value = LoginPhase.LoggingIn; _urlToLoad.value = NaverWebViewConfig.LOGIN_URL; return }
+                if (resolving) return
                 val id = BlogIdResolver.fromUrl(url) ?: return
-                _phase.value = LoginPhase.Done(id)
-                viewModelScope.launch { settings.setBlogId(id) }
+                resolving = true
+                viewModelScope.launch {
+                    settings.setBlogId(id)
+                    _phase.value = LoginPhase.Done(id)
+                    resolving = false
+                }
             }
             is LoginPhase.Done -> Unit
         }

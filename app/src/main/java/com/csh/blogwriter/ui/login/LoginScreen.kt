@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -41,6 +42,7 @@ fun LoginScreen(onBack: () -> Unit, onDone: (blogId: String) -> Unit, viewModel:
             }
         }
     }
+    DisposableEffect(webView) { onDispose { webView.stopLoading(); webView.destroy() } }
     LaunchedEffect(url) { webView.loadUrl(url) }
     LaunchedEffect(phase) { (phase as? LoginPhase.Done)?.let { onDone(it.blogId) } }
 
