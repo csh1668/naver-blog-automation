@@ -211,6 +211,37 @@ class ChatViewModel @Inject constructor(
 
     fun clearError() = _uiState.update { it.copy(error = null) }
 
+    /**
+     * 대화를 지운다. 지금 열려 있는 대화면 돌던 턴을 취소하고(늦게 온 답이 사라진 대화에 붙지 않게),
+     * 남은 대화 중 가장 최근 것으로 옮긴다 — 없으면 새 대화를 연다.
+     */
+    fun deleteSession(id: String) {
+        viewModelScope.launch {
+            val target = chatRepo.getSession(id)
+            val isOpenSession = _uiState.value.session?.id == id
+            if (isOpenSession) { turnJob?.cancel(); turnJob = null }
+            chatRepo.deleteSession(id)
+            target?.pendingJobId?.let { pendingJobs.delete(it) }
+            photoAttachments.clear(id)
+            if (isOpenSession) {
+                val next = chatRepo.observeSessions().first().firstOrNull()
+                open(next?.id)
+            }
+        }
+    }
+
+    /** 대화 이름을 바꾼다. updatedAt 은 건드리지 않아 목록 순서(최근 대화순)는 그대로다. */
+    fun renameSession(id: String, title: String) {
+        val trimmed = title.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            chatRepo.setTitle(id, trimmed)
+            if (_uiState.value.session?.id == id) {
+                _uiState.update { it.copy(session = it.session?.copy(title = trimmed)) }
+            }
+        }
+    }
+
     fun onPublished(url: String) {
         val session = _uiState.value.session ?: return
         viewModelScope.launch {
@@ -313,7 +344,8 @@ class ChatViewModel @Inject constructor(
             else -> response.quickReplies
         }
         _uiState.update { it.copy(quickReplies = chips) }
-        val title = post?.title ?: session.title ?: response.plan?.titleCandidates?.firstOrNull()
+        // 제목은 한 번만 자동으로 붙는다 — session.title 이 이미 있으면(자동이든 사용자가 바꿨든) 건드리지 않는다.
+        val title = session.title ?: post?.title ?: response.plan?.titleCandidates?.firstOrNull()
         if (title != session.title) updateSession(session.copy(title = title))
         post?.let { onPostRevised(sessionId, it) }
     }

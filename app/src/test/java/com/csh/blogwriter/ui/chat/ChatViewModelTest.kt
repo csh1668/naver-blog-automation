@@ -89,6 +89,10 @@ class ChatViewModelTest {
             messages.value = messages.value.filterNot { it.sessionId == id }
         }
 
+        override suspend fun setTitle(id: String, title: String) {
+            sessions.value = sessions.value.map { if (it.id == id) it.copy(title = title) else it }
+        }
+
         fun of(sessionId: String) = messages.value.filter { it.sessionId == sessionId }
     }
 
@@ -515,5 +519,62 @@ class ChatViewModelTest {
         assertEquals(listOf(sessionId), photos.cleared)
         assertEquals(listOf(sessionId to "https://blog.naver.com/b/1"), hook.published)
         assertTrue(ChatPayloads.readText(vm.uiState.value.messages.last().payloadJson).contains("발행했어요"))
+    }
+
+    /** 지금 열려 있는 대화를 지우면 돌던 턴이 취소되고, 딸린 것들(메시지·발행 작업·사진 캐시)이 함께 사라지며,
+     *  남은 대화 중 가장 최근 것으로 옮겨 간다. */
+    @Test
+    fun deletingASessionRemovesItsMessagesJobAndSwitchesAway() = runTest {
+        turns += TurnResult.Success(TurnResponse("초안이에요", post = post()), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        val sessionId = vm.uiState.value.session!!.id
+        vm.requestDraft(); advanceUntilIdle()
+        val jobId = vm.uiState.value.panelJobId!!
+        assertTrue(chatRepo.of(sessionId).isNotEmpty())
+
+        vm.open(null); advanceUntilIdle()          // 다른 대화를 하나 더 연다 — 지운 뒤 이리로 옮겨 가야 한다.
+        val otherId = vm.uiState.value.session!!.id
+        assertNotEquals(sessionId, otherId)
+        vm.open(sessionId); advanceUntilIdle()     // 지울 대화를 다시 연다.
+
+        // 지우는 순간 다른 턴이 돌고 있었으면 그 턴은 취소되어야 한다 — 안 그러면 늦게 온 답이
+        // 이미 사라진 대화 id로 다시 메시지를 만들어 낸다.
+        gate = CompletableDeferred()
+        vm.send("문단 2를 더 짧게")
+        assertTrue(vm.uiState.value.thinking)
+
+        vm.deleteSession(sessionId); advanceUntilIdle()
+        gate!!.complete(Unit); advanceUntilIdle()
+
+        assertNull(chatRepo.getSession(sessionId))
+        assertTrue(chatRepo.of(sessionId).isEmpty())
+        assertNull(pendingJobs.get(jobId))
+        assertEquals(listOf(sessionId), photos.cleared)
+        assertEquals(otherId, vm.uiState.value.session!!.id)
+        assertFalse(vm.uiState.value.thinking)
+    }
+
+    /** 이름을 바꾸면 그대로 남아야 한다 — 다음 초안이 다른 제목을 내도 자동 제목이 덮어써서는 안 된다. */
+    @Test
+    fun renamingKeepsOrderAndIsNotOverwrittenByAutoTitle() = runTest {
+        turns += TurnResult.Success(TurnResponse("좋아요", post = post("첫 제목")), emptyList(), "flash")
+        turns += TurnResult.Success(TurnResponse("고쳤어요", post = post("둘째 제목")), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        val sessionId = vm.uiState.value.session!!.id
+
+        vm.requestDraft(); advanceUntilIdle()
+        assertEquals("첫 제목", vm.uiState.value.session!!.title)
+
+        vm.renameSession(sessionId, "  내가 지은 이름  "); advanceUntilIdle()
+        assertEquals("내가 지은 이름", vm.uiState.value.session!!.title)
+        assertEquals("내가 지은 이름", chatRepo.getSession(sessionId)!!.title)
+
+        vm.send("문단 2를 더 짧게"); advanceUntilIdle()
+        assertEquals("내가 지은 이름", vm.uiState.value.session!!.title)
+        assertEquals("내가 지은 이름", chatRepo.getSession(sessionId)!!.title)
+
+        // 빈 이름은 무시한다.
+        vm.renameSession(sessionId, "   "); advanceUntilIdle()
+        assertEquals("내가 지은 이름", vm.uiState.value.session!!.title)
     }
 }

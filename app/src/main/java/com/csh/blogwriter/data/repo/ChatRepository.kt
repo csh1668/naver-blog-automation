@@ -24,6 +24,8 @@ interface ChatRepository {
     suspend fun appendMessage(sessionId: String, role: MessageRole, kind: MessageKind, payloadJson: String): ChatMessage
     suspend fun messagesOnce(sessionId: String): List<ChatMessage>
     suspend fun deleteSession(id: String)
+    /** 제목만 바꾼다 — [updateSession] 과 달리 updatedAt 을 건드리지 않아 목록 순서가 그대로다. */
+    suspend fun setTitle(id: String, title: String)
 }
 
 class RoomChatRepository @Inject constructor(private val dao: ChatDao) : ChatRepository {
@@ -49,4 +51,5 @@ class RoomChatRepository @Inject constructor(private val dao: ChatDao) : ChatRep
     }
     override suspend fun messagesOnce(sessionId: String) = dao.messages(sessionId).map { it.toModel() }
     override suspend fun deleteSession(id: String) = dao.deleteSession(id)
+    override suspend fun setTitle(id: String, title: String) = dao.setTitle(id, title)
 }

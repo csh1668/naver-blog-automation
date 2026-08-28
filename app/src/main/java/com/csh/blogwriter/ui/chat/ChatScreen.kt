@@ -137,6 +137,8 @@ fun ChatScreen(
                         onSelect = viewModel::open,
                         onNew = { viewModel.open(null) },
                         onToggle = viewModel::toggleList,
+                        onDelete = viewModel::deleteSession,
+                        onRename = viewModel::renameSession,
                     )
                 }
                 ChatPane(
@@ -171,6 +173,8 @@ fun ChatScreen(
                             onSelect = { id -> viewModel.open(id); scope.launch { drawerState.close() } },
                             onNew = { viewModel.open(null); scope.launch { drawerState.close() } },
                             onToggle = { scope.launch { drawerState.close() } },
+                            onDelete = viewModel::deleteSession,
+                            onRename = viewModel::renameSession,
                         )
                     }
                 },
