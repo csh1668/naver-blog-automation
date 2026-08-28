@@ -57,7 +57,7 @@ object TurnSchemas {
     }
 
     fun functionDeclarations(): List<GFunctionDeclaration> = listOf(
-        GFunctionDeclaration("web_search", "네이버(실패 시 구글)에서 검색해 제목·주소·요약 목록을 돌려준다. 영업시간·주소·가격·행사 날짜처럼 사실 확인이 필요할 때만 쓴다.",
+        GFunctionDeclaration("web_search", "네이버(실패 시 구글)에서 검색해 결과 목록(results)과 결과 페이지 요약(pageSummary: 플레이스 카드의 영업시간·주소·전화·가격 등)을 돌려준다. 영업시간·주소·가격·행사 날짜처럼 사실 확인이 필요할 때 쓴다. pageSummary 에 답이 있으면 open_page 는 필요 없다.",
             buildJsonObject { put("type", "object"); putJsonObject("properties") { put("query", str("검색어")) }; putJsonArray("required") { add("query") } }),
         GFunctionDeclaration("open_page", "웹 페이지를 열어 본문 텍스트(최대 4000자)를 돌려준다. web_search 결과의 url만 연다.",
             buildJsonObject { put("type", "object"); putJsonObject("properties") { put("url", str("http(s) 주소")) }; putJsonArray("required") { add("url") } }),

@@ -1,5 +1,7 @@
 package com.csh.blogwriter.chat
 
+import android.util.Log
+
 import com.csh.blogwriter.data.prefs.SettingsStore
 import com.csh.blogwriter.data.repo.MemoryKind
 import com.csh.blogwriter.data.repo.MemoryRepository
@@ -38,9 +40,15 @@ class DefaultToolExecutor @Inject constructor(
                 "web_search" -> {
                     val q = args["query"]?.jsonPrimitive?.content.orEmpty()
                     onProgress("네이버에서 '$q' 정보를 찾고 있어요…")
-                    val hits = research.search(q)
+                    val found = research.searchDetailed(q)
+                    val hits = found.hits
                     allowedUrls += hits.map { normalizeUrl(it.url) }
-                    buildJsonObject { put("results", buildJsonArray { hits.forEach { h -> add(buildJsonObject { put("title", h.title); put("url", h.url); put("snippet", h.snippet) }) } }) }
+                    Log.d(TAG, "web_search q='${q.take(40)}' hits=${hits.size} summary=${found.summary.length}c titles=${hits.take(3).joinToString(" | ") { it.title.take(30) }}")
+                    buildJsonObject {
+                        put("results", buildJsonArray { hits.forEach { h -> add(buildJsonObject { put("title", h.title); put("url", h.url); put("snippet", h.snippet) }) } })
+                        // 결과 페이지 요약(플레이스 카드 등). 영업시간·주소·가격은 대개 여기서 바로 읽을 수 있다.
+                        if (found.summary.isNotBlank()) put("pageSummary", found.summary)
+                    }
                 }
                 "open_page" -> {
                     val url = args["url"]?.jsonPrimitive?.content.orEmpty()
@@ -82,3 +90,5 @@ internal fun normalizeUrl(u: String): String {
     val query = uri.rawQuery?.let { "?$it" }.orEmpty()
     return "$scheme://$host$port$path$query"
 }
+
+private const val TAG = "ToolExecutor"

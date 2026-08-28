@@ -199,12 +199,15 @@ class ConversationEngine(
             var text = ""
             var finishReason: String? = null
             val calls = mutableListOf<GFunctionCall>()
+            // 도구 호출 part 는 서명(thoughtSignature)까지 그대로 보관했다가 되돌려 준다.
+            val callParts = mutableListOf<GPart>()
             // 새 스트림은 처음부터 다시 쌓인다 — UI 가 이전 접두를 지우도록 빈 문자열을 먼저 보낸다.
             var lastPartial: String? = ""
             listener.onPartialSay("")
             client.generateStream(secret, model, req).collect { chunk ->
                 chunk.text?.let { text += it }
                 calls += chunk.functionCalls
+                callParts += chunk.candidates.firstOrNull()?.content?.parts.orEmpty().filter { it.functionCall != null }
                 chunk.candidates.firstOrNull()?.finishReason?.let { finishReason = it }
                 PartialSayExtractor.extract(text)?.let { partial ->
                     if (partial != lastPartial) { lastPartial = partial; listener.onPartialSay(partial) }
@@ -213,7 +216,7 @@ class ConversationEngine(
 
             if (calls.isNotEmpty()) {
                 if (++toolRounds > MAX_TOOL_ROUNDS) throw BadResponse("도구 호출이 너무 많습니다")
-                contents += GContent("model", calls.map { GPart(functionCall = it) })
+                contents += GContent("model", callParts)
                 contents += GContent("user", calls.map { call ->
                     GPart(functionResponse = GFunctionResponse(call.name, runTool(tools, call, listener)))
                 })

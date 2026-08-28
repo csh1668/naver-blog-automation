@@ -11,6 +11,8 @@ import kotlinx.serialization.json.JsonObject
     val inlineData: GInlineData? = null,
     val functionCall: GFunctionCall? = null,
     val functionResponse: GFunctionResponse? = null,
+    /** Gemini 3.x 가 도구 호출에 붙여 주는 서명. 다음 요청에 그대로 되돌려 줘야 한다(없으면 400). */
+    val thoughtSignature: String? = null,
 )
 @Serializable data class GContent(val role: String, val parts: List<GPart>)
 @Serializable data class GSystemInstruction(val parts: List<GPart>)

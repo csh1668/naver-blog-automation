@@ -100,7 +100,7 @@ class ConversationEngineTest {
         val finish = if (finishReason == null) "" else ",\"finishReason\":\"" + finishReason + "\""
         return """{"candidates":[{"content":{"role":"model","parts":[{"text":${quote(text)}}]}$finish}]}"""
     }
-    private val callChunk = """{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"web_search","args":{"query":"원주 한우"}}}]}}]}"""
+    private val callChunk = """{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"web_search","args":{"query":"원주 한우"}},"thoughtSignature":"sig-abc"}]}}]}"""
     private fun sse(vararg chunks: String) = MockResponse().setHeader("Content-Type", "text/event-stream")
         .setBody(chunks.joinToString("") { "data: $it\n\n" })
 
@@ -243,6 +243,18 @@ class ConversationEngineTest {
         assertEquals("lite", r.usedModel)
         assertTrue(server.takeRequest().path!!.contains("flash:streamGenerateContent"))
         assertTrue(server.takeRequest().path!!.contains("lite:streamGenerateContent"))
+    }
+
+    @Test
+    fun toolCallSignatureIsEchoedBackToTheModel() = runTest {
+        // Gemini 3.x: functionCall 의 thoughtSignature 를 다음 요청에 되돌려 주지 않으면 400 이다.
+        server.enqueue(sse(callChunk))
+        server.enqueue(textResponse("""{"say":"찾았어요","quickReplies":[],"readyToDraft":false}"""))
+        engine.runTurn(ctx(), Recorder()) as TurnResult.Success
+        server.takeRequest()
+        val second = server.takeRequest().body.readUtf8()
+        assertTrue(second.contains("\"thoughtSignature\":\"sig-abc\""))
+        assertTrue(second.contains("\"functionResponse\""))
     }
 
     @Test
