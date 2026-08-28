@@ -16,7 +16,7 @@ data class ChatContext(
 sealed interface TurnResult {
     data class Success(val response: TurnResponse, val repairs: List<String>, val usedModel: String) : TurnResult
     data class Failure(val reason: Reason, val retryAt: Long? = null, val detail: String = "") : TurnResult
-    enum class Reason { NO_KEY, RATE_LIMITED, NETWORK, BAD_RESPONSE, OTHER }
+    enum class Reason { NO_KEY, RATE_LIMITED, NETWORK, SERVER, BAD_RESPONSE, OTHER }
 }
 
 /** 턴이 진행되는 동안 UI 로 흘려보내는 신호. 구현은 UI 스레드를 가정하지 않는다. */

@@ -85,7 +85,10 @@ class ConversationEngine(
             val picked = rot.next() ?: return TurnResult.Failure(TurnResult.Reason.RATE_LIMITED, rot.nextAvailableAt(), "모든 키가 쉬는 중이에요")
             val model = if (picked.model in deadModels) {
                 policy.models.firstOrNull { it !in deadModels }
-                    ?: return TurnResult.Failure(TurnResult.Reason.OTHER, detail = lastDetail.ifEmpty { "쓸 수 있는 모델이 없어요" })
+                    ?: return TurnResult.Failure(
+                        if (lastKind == GeminiException.Kind.SERVER) TurnResult.Reason.SERVER else TurnResult.Reason.OTHER,
+                        detail = lastDetail.ifEmpty { "쓸 수 있는 모델이 없어요" },
+                    )
             } else picked.model
             val pick = picked.copy(model = model)
             val secret = keys.firstOrNull { it.id == pick.keyId }?.secret ?: continue
@@ -110,9 +113,14 @@ class ConversationEngine(
                         // 그 밖의 4xx(404 모델 없음, 413 등)는 이 모델을 접고 다음 pick/모델로.
                         else -> { deadModels += pick.model; rot.report(pick, KeyRotator.Outcome.TRANSIENT) }
                     }
-                    GeminiException.Kind.SERVER, GeminiException.Kind.NETWORK ->
+                    GeminiException.Kind.NETWORK ->
                         if (!transientRetried) { transientRetried = true; attempts-- }
                         else rot.report(pick, KeyRotator.Outcome.TRANSIENT)
+                    // 5xx(503 과부하 등)는 키가 아니라 모델 쪽 문제 — 같은 pick 으로 한 번만 더 해 보고,
+                    // 그래도 안 되면 이 모델을 이번 턴에서 접고 대체 모델로 내려간다(키만 바꿔 가며 같은 모델을 두드리지 않는다).
+                    GeminiException.Kind.SERVER ->
+                        if (!transientRetried) { transientRetried = true; attempts-- }
+                        else { deadModels += pick.model; rot.report(pick, KeyRotator.Outcome.TRANSIENT) }
                 }
             } catch (e: BadResponse) {
                 Log.w(TAG, "attempt $attempts bad response: ${e.message}")
@@ -123,6 +131,7 @@ class ConversationEngine(
             GeminiException.Kind.RATE_LIMITED -> TurnResult.Failure(TurnResult.Reason.RATE_LIMITED, rot.nextAvailableAt(), lastDetail)
             GeminiException.Kind.INVALID_KEY -> TurnResult.Failure(TurnResult.Reason.NO_KEY, detail = lastDetail)
             GeminiException.Kind.BAD_REQUEST -> TurnResult.Failure(TurnResult.Reason.OTHER, detail = lastDetail)
+            GeminiException.Kind.SERVER -> TurnResult.Failure(TurnResult.Reason.SERVER, detail = lastDetail)
             else -> TurnResult.Failure(TurnResult.Reason.NETWORK, detail = lastDetail.ifEmpty { "재시도 한도 초과" })
         }
     }

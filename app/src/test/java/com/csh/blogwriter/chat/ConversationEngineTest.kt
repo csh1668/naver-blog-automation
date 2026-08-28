@@ -234,11 +234,28 @@ class ConversationEngineTest {
     }
 
     @Test
-    fun repeatedTransientErrorsFailWithNetwork() = runTest {
-        repeat(12) { server.enqueue(error(500, "INTERNAL")) }
+    fun repeatedServerErrorsGiveUpEveryModelAndFailWithServer() = runTest {
+        // 503 이 계속되면: 같은 pick 재시도 1회 → flash 접음 → lite 재시도 → lite 도 접음 → SERVER 실패.
+        repeat(12) { server.enqueue(error(503, "UNAVAILABLE")) }
         val r = engine.runTurn(ctx(), Recorder()) as TurnResult.Failure
-        assertEquals(TurnResult.Reason.NETWORK, r.reason)
-        assertTrue(server.requestCount >= 3)
+        assertEquals(TurnResult.Reason.SERVER, r.reason)
+        val paths = (0 until server.requestCount).map { server.takeRequest().path!! }
+        assertTrue(paths.size in 3..4)
+        assertTrue(paths.any { it.contains("lite:streamGenerateContent") })
+    }
+
+    @Test
+    fun serverOverloadFallsBackToNextModel() = runTest {
+        // 503 두 번(원래 + 무료 재시도) 뒤에는 키를 돌리지 않고 대체 모델로 내려간다.
+        server.enqueue(error(503, "UNAVAILABLE"))
+        server.enqueue(error(503, "UNAVAILABLE"))
+        server.enqueue(textResponse("""{"say":"라이트로 갔어요","quickReplies":[],"readyToDraft":false}"""))
+        val r = engine.runTurn(ctx(), Recorder()) as TurnResult.Success
+        assertEquals("lite", r.usedModel)
+        assertEquals(3, server.requestCount)
+        assertTrue(server.takeRequest().path!!.contains("flash:streamGenerateContent"))
+        assertTrue(server.takeRequest().path!!.contains("flash:streamGenerateContent"))
+        assertTrue(server.takeRequest().path!!.contains("lite:streamGenerateContent"))
     }
 
     @Test

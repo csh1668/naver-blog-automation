@@ -337,7 +337,7 @@ class ChatViewModel @Inject constructor(
 
     private suspend fun onFailure(sessionId: String, failure: TurnResult.Failure) {
         system(sessionId, failureCopy(failure))
-        if (failure.reason == TurnResult.Reason.RATE_LIMITED) {
+        if (failure.reason == TurnResult.Reason.RATE_LIMITED || failure.reason == TurnResult.Reason.SERVER) {
             _uiState.update { it.copy(quickReplies = listOf(RETRY_CHIP)) }
         }
     }
@@ -346,6 +346,7 @@ class ChatViewModel @Inject constructor(
         TurnResult.Reason.NO_KEY -> NO_KEY
         TurnResult.Reason.RATE_LIMITED -> "지금은 잠깐 쉬어야 해요. ${minutesUntil(failure.retryAt)}분 뒤에 다시 시도할게요."
         TurnResult.Reason.NETWORK -> "인터넷이 연결되어 있지 않아요. 연결되면 다시 보내 주세요."
+        TurnResult.Reason.SERVER -> "AI 서버가 지금 붐벼서 답을 못 받았어요. 잠시 뒤에 다시 시도해 주세요."
         TurnResult.Reason.BAD_RESPONSE -> "잘 못 알아들었어요. 다시 말해 주세요."
         TurnResult.Reason.OTHER -> "문제가 생겼어요. 관리자에게 알려 주세요."
     }
