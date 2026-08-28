@@ -32,7 +32,11 @@ class NaverEditorWebView(context: Context, private val listener: Listener) : Edi
 
     val view: WebView = WebView(context).also { web ->
         NaverWebViewConfig.apply(web)
-        web.addJavascriptInterface(EditorBridge(listener), "AndroidBridge")
+        // JS 쪽 B.log 는 화면에서 쓰지 않으므로 여기서 로그캣에 남긴다 (팝업 자동 닫기 등 확인용).
+        val logging = object : Listener by listener {
+            override fun onLog(message: String) { Log.d(TAG, "JS $message"); listener.onLog(message) }
+        }
+        web.addJavascriptInterface(EditorBridge(logging), "AndroidBridge")
         web.webViewClient = object : WebViewClient() {
             override fun onPageStarted(v: WebView, url: String, favicon: Bitmap?) { listener.onUrlChanged(url) }
             override fun doUpdateVisitedHistory(v: WebView, url: String, isReload: Boolean) { listener.onUrlChanged(url) }
