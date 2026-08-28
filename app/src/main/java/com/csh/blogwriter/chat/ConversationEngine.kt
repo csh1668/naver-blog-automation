@@ -20,9 +20,15 @@ import com.csh.blogwriter.llm.GeminiClient
 import com.csh.blogwriter.llm.GeminiException
 import com.csh.blogwriter.llm.KeyRotator
 import com.csh.blogwriter.llm.ModelPolicy
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /**
  * 한 턴 = 시스템 프롬프트 조립 → (키, 모델) 선택 → streamGenerateContent(SSE) → 도구 루프 → JSON 파싱 → post 보정.
@@ -36,13 +42,16 @@ class ConversationEngine(
     private val promptBuilder: PromptBuilder,
     private val memory: MemoryRepository,
     private val toolsFactory: () -> ToolExecutor,
-    private val clock: () -> Long = System::currentTimeMillis,
+    @Suppress("UNUSED_PARAMETER") clock: () -> Long = System::currentTimeMillis,
 ) : TurnRunner {
     companion object {
         const val MAX_TOOL_ROUNDS = 6
         private const val JSON_ONLY_HINT = "\n\n반드시 JSON 객체 하나만 출력하세요. 코드 펜스나 설명을 붙이지 마세요."
+        private const val TRUNCATED = "응답이 너무 길어 잘렸어요"
     }
 
+    /** 싱글턴이라 여러 화면에서 동시에 들어올 수 있다 — 로테이터 재사용/재생성은 잠금 안에서. */
+    private val rotatorLock = Mutex()
     private var rotator: KeyRotator? = null
     private var rotatorKeys: List<String> = emptyList()
     private var rotatorModels: List<String> = emptyList()
@@ -53,10 +62,7 @@ class ConversationEngine(
         if (keys.isEmpty()) return TurnResult.Failure(TurnResult.Reason.NO_KEY, detail = "쓸 수 있는 API 키가 없어요")
         val policy = policyProvider()
         val ids = keys.map { it.id }
-        if (rotator == null || rotatorKeys != ids || rotatorModels != policy.models) {
-            rotator = rotatorFactory(ids, policy.models); rotatorKeys = ids; rotatorModels = policy.models
-        }
-        val rot = rotator!!
+        val rot = rotatorFor(ids, policy.models)
 
         val memItems = memory.activeItems()
         val system = promptBuilder.system(memItems, ctx.style, policy.targetLength, ctx.draftTurn)
@@ -65,12 +71,21 @@ class ConversationEngine(
         val tools = toolsFactory()
 
         var useSchema = true
+        // 이번 "턴" 전체에 한 번만 주는 무료 재시도. pick 마다 주면 시도 상한이 흐려진다.
         var transientRetried = false
+        // 이번 턴에 하드 4xx(404 모델 없음 등)를 낸 모델 — 다음 pick 부터 건너뛴다.
+        val deadModels = mutableSetOf<String>()
         var attempts = 0
         var lastDetail = ""
+        var lastKind: GeminiException.Kind? = null
         val maxAttempts = ids.size * policy.models.size + 2
         while (attempts++ < maxAttempts) {
-            val pick = rot.next() ?: return TurnResult.Failure(TurnResult.Reason.RATE_LIMITED, rot.nextAvailableAt(), "모든 키가 쉬는 중이에요")
+            val picked = rot.next() ?: return TurnResult.Failure(TurnResult.Reason.RATE_LIMITED, rot.nextAvailableAt(), "모든 키가 쉬는 중이에요")
+            val model = if (picked.model in deadModels) {
+                policy.models.firstOrNull { it !in deadModels }
+                    ?: return TurnResult.Failure(TurnResult.Reason.OTHER, detail = lastDetail.ifEmpty { "쓸 수 있는 모델이 없어요" })
+            } else picked.model
+            val pick = picked.copy(model = model)
             val secret = keys.firstOrNull { it.id == pick.keyId }?.secret ?: continue
             try {
                 val result = runWithTools(secret, pick.model, system, contents, attachedRefs, policy, useSchema, tools, listener)
@@ -79,14 +94,17 @@ class ConversationEngine(
                 return result
             } catch (e: GeminiException) {
                 lastDetail = e.message.orEmpty()
+                lastKind = e.kind
                 when (e.kind) {
                     GeminiException.Kind.RATE_LIMITED -> { rot.report(pick, KeyRotator.Outcome.RATE_LIMITED); keyStore.markLimited(pick.keyId) }
                     GeminiException.Kind.INVALID_KEY -> { rot.report(pick, KeyRotator.Outcome.INVALID_KEY); keyStore.markInvalid(pick.keyId) }
-                    // 스키마를 안 받아 주는 모델이면 스키마 없이 같은 pick 으로 한 번 더 (재시도 횟수에 넣지 않는다).
-                    GeminiException.Kind.BAD_REQUEST ->
-                        if (useSchema) { useSchema = false; attempts-- }
-                        else return TurnResult.Failure(TurnResult.Reason.OTHER, detail = lastDetail)
-                    // 일시적 오류는 같은 pick 으로 한 번 재시도한 뒤 다음 pick 으로 넘긴다.
+                    GeminiException.Kind.BAD_REQUEST -> when {
+                        // 400 이고 스키마를 보냈다면 스키마를 안 받아 주는 모델 — 스키마 없이 같은 pick 으로 한 번 더(시도 횟수 미차감).
+                        e.code == 400 && useSchema -> { useSchema = false; attempts-- }
+                        e.code == 400 -> return TurnResult.Failure(TurnResult.Reason.OTHER, detail = lastDetail)
+                        // 그 밖의 4xx(404 모델 없음, 413 등)는 이 모델을 접고 다음 pick/모델로.
+                        else -> { deadModels += pick.model; rot.report(pick, KeyRotator.Outcome.TRANSIENT) }
+                    }
                     GeminiException.Kind.SERVER, GeminiException.Kind.NETWORK ->
                         if (!transientRetried) { transientRetried = true; attempts-- }
                         else rot.report(pick, KeyRotator.Outcome.TRANSIENT)
@@ -95,7 +113,18 @@ class ConversationEngine(
                 return TurnResult.Failure(TurnResult.Reason.BAD_RESPONSE, detail = e.message.orEmpty())
             }
         }
-        return TurnResult.Failure(TurnResult.Reason.NETWORK, detail = lastDetail.ifEmpty { "재시도 한도 초과" })
+        return when (lastKind) {
+            GeminiException.Kind.RATE_LIMITED -> TurnResult.Failure(TurnResult.Reason.RATE_LIMITED, rot.nextAvailableAt(), lastDetail)
+            GeminiException.Kind.INVALID_KEY -> TurnResult.Failure(TurnResult.Reason.NO_KEY, detail = lastDetail)
+            GeminiException.Kind.BAD_REQUEST -> TurnResult.Failure(TurnResult.Reason.OTHER, detail = lastDetail)
+            else -> TurnResult.Failure(TurnResult.Reason.NETWORK, detail = lastDetail.ifEmpty { "재시도 한도 초과" })
+        }
+    }
+
+    private suspend fun rotatorFor(ids: List<String>, models: List<String>): KeyRotator = rotatorLock.withLock {
+        val current = rotator
+        if (current != null && rotatorKeys == ids && rotatorModels == models) current
+        else rotatorFactory(ids, models).also { rotator = it; rotatorKeys = ids; rotatorModels = models }
     }
 
     private class BadResponse(msg: String) : Exception(msg)
@@ -115,7 +144,8 @@ class ConversationEngine(
         var temperature = policy.temperature
         var jsonRetry = false
         var toolRounds = 0
-        repeat(MAX_TOOL_ROUNDS + 2) {
+        // 매 반복은 성공 반환·예외·(도구 라운드 | JSON 재시도) 중 하나 — 둘 다 상한이 있어 루프는 끝난다.
+        while (true) {
             val req = GRequest(
                 contents = contents,
                 systemInstruction = GSystemInstruction(listOf(GPart(text = if (useSchema) system else system + JSON_ONLY_HINT))),
@@ -128,11 +158,15 @@ class ConversationEngine(
                 ),
             )
             var text = ""
+            var finishReason: String? = null
             val calls = mutableListOf<GFunctionCall>()
-            var lastPartial: String? = null
+            // 새 스트림은 처음부터 다시 쌓인다 — UI 가 이전 접두를 지우도록 빈 문자열을 먼저 보낸다.
+            var lastPartial: String? = ""
+            listener.onPartialSay("")
             client.generateStream(secret, model, req).collect { chunk ->
                 chunk.text?.let { text += it }
                 calls += chunk.functionCalls
+                chunk.candidates.firstOrNull()?.finishReason?.let { finishReason = it }
                 PartialSayExtractor.extract(text)?.let { partial ->
                     if (partial != lastPartial) { lastPartial = partial; listener.onPartialSay(partial) }
                 }
@@ -142,22 +176,32 @@ class ConversationEngine(
                 if (++toolRounds > MAX_TOOL_ROUNDS) throw BadResponse("도구 호출이 너무 많습니다")
                 contents += GContent("model", calls.map { GPart(functionCall = it) })
                 contents += GContent("user", calls.map { call ->
-                    GPart(functionResponse = GFunctionResponse(call.name, tools.execute(call.name, call.args, listener::onToolStatus)))
+                    GPart(functionResponse = GFunctionResponse(call.name, runTool(tools, call, listener)))
                 })
-                return@repeat
+                continue
             }
 
-            if (text.isEmpty()) throw BadResponse("빈 응답")
+            if (text.isEmpty()) throw BadResponse(if (finishReason == "MAX_TOKENS") TRUNCATED else "빈 응답")
             val parsed = runCatching { TurnResponseJson.decode(text) }.getOrElse {
-                // 온도 0 으로 한 번 더 — 그래도 안 되면 포기.
-                if (!jsonRetry) { jsonRetry = true; temperature = 0.0; return@repeat }
+                // 잘려서 못 읽는 거라면 다시 물어봐도 똑같다 — 온도 0 재시도는 건너뛴다.
+                if (finishReason == "MAX_TOKENS") throw BadResponse(TRUNCATED)
+                if (!jsonRetry) { jsonRetry = true; temperature = 0.0; continue }
                 throw BadResponse("JSON 해석 실패: ${it.message}")
             }
             val repaired = parsed.post?.let { PostContentRepair.repair(it, attachedRefs) }
             return TurnResult.Success(if (repaired != null) parsed.copy(post = repaired.content) else parsed, repaired?.fixes ?: emptyList(), model)
         }
-        throw BadResponse("도구 호출이 너무 많습니다")
     }
+
+    /** 도구는 throw 하지 않기로 약속돼 있지만, 어겨도 턴을 죽이지 않고 오류 JSON 으로 모델에 돌려준다. */
+    private suspend fun runTool(tools: ToolExecutor, call: GFunctionCall, listener: TurnListener): JsonObject =
+        try {
+            tools.execute(call.name, call.args, listener::onToolStatus)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            buildJsonObject { put("error", e.message ?: "tool failed") }
+        }
 
     /** 대화 기록 → contents. 사진은 첫 user 파트에 inlineData 로, ref 라벨을 텍스트로 함께 붙인다. 현재 post 가 있으면 마지막에 전문을 붙인다. */
     private fun buildContents(ctx: ChatContext): List<GContent> {

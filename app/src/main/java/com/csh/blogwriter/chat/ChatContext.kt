@@ -23,7 +23,11 @@ sealed interface TurnResult {
 interface TurnListener {
     /** 도구 실행 진행 문구("검색 중" 등). */
     fun onToolStatus(text: String)
-    /** 스트리밍 중인 `say` 의 현재 접두(JSON 이스케이프 해제 완료). */
+    /**
+     * 스트리밍 중인 `say` 의 **현재 전체 접두**(JSON 이스케이프 해제 완료).
+     * 이어붙이지 말고 항상 **교체**해야 한다. 새 스트림(도구 라운드, 온도 0 재시도, 키/모델 로테이션)이
+     * 시작될 때마다 보내는 빈 문자열("")은 "지금까지 보여 준 것을 지우라"는 뜻이다 — 값은 줄어들 수 있다.
+     */
     fun onPartialSay(text: String)
 }
 

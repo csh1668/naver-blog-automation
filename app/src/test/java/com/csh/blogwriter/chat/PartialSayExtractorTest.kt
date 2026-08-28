@@ -16,6 +16,9 @@ class PartialSayExtractorTest {
         assertNull(PartialSayExtractor.extract("""{"say":"""))
     }
 
+    @Test fun ignoresSayInsideAnEarlierStringValue() =
+        assertEquals("진짜", PartialSayExtractor.extract("""{"note":"\"say\":\"가짜","say":"진짜"""))
+
     @Test fun dropsIncompleteUnicodeEscape() = assertEquals("a", PartialSayExtractor.extract("""{"say":"a\u"""))
 
     @Test fun decodesCompleteUnicodeEscape() = assertEquals("aéb", PartialSayExtractor.extract("""{"say":"a\u00e9b"""))

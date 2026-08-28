@@ -66,6 +66,7 @@ class ConversationEngineTest {
             toolCalls += name; onProgress("검색 중"); return buildJsonObject { put("results", "원주 한우 주소 …") }
         }
     }
+    private var toolOverride: ToolExecutor? = null
 
     private class Recorder : TurnListener {
         val toolStatus = mutableListOf<String>()
@@ -82,7 +83,7 @@ class ConversationEngineTest {
         val client = GeminiClient(OkHttpClient(), server.url("/").toString().trimEnd('/'))
         engine = ConversationEngine(
             client, keyStore, { k, m -> KeyRotator(k, m) { now } }, { ModelPolicy(listOf("flash", "lite")) },
-            PromptBuilder(promptStore), memory, { tools },
+            PromptBuilder(promptStore), memory, { toolOverride ?: tools },
         ) { now }
     }
     @After fun tearDown() = server.shutdown()
@@ -93,7 +94,11 @@ class ConversationEngineTest {
     )
 
     private fun quote(s: String) = Json.encodeToString(kotlinx.serialization.serializer<String>(), s)
-    private fun chunk(text: String) = """{"candidates":[{"content":{"role":"model","parts":[{"text":${quote(text)}}]}}]}"""
+    private fun chunk(text: String, finishReason: String? = null): String {
+        val finish = if (finishReason == null) "" else ",\"finishReason\":\"" + finishReason + "\""
+        return """{"candidates":[{"content":{"role":"model","parts":[{"text":${quote(text)}}]}$finish}]}"""
+    }
+    private val callChunk = """{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"web_search","args":{"query":"원주 한우"}}}]}}]}"""
     private fun sse(vararg chunks: String) = MockResponse().setHeader("Content-Type", "text/event-stream")
         .setBody(chunks.joinToString("") { "data: $it\n\n" })
 
@@ -123,20 +128,55 @@ class ConversationEngineTest {
         server.enqueue(textResponse("""{"say":"이렇게 써 볼까요?","quickReplies":[],"readyToDraft":false}"""))
         val rec = Recorder()
         val r = engine.runTurn(ctx(), rec) as TurnResult.Success
-        assertTrue("partials=${rec.partials}", rec.partials.size >= 2)
+        assertEquals("", rec.partials.first())
+        assertTrue("partials=${rec.partials}", rec.partials.size >= 3)
         rec.partials.zipWithNext().forEach { (a, b) -> assertTrue("$a -> $b", b.length > a.length && b.startsWith(a)) }
         assertEquals(r.response.say, rec.partials.last())
     }
 
     @Test
+    fun resetsPartialSayBetweenStreams() = runTest {
+        server.enqueue(sse(chunk("""{"say":"찾아볼게"""), callChunk))
+        server.enqueue(textResponse("""{"say":"찾았어요","quickReplies":[],"readyToDraft":false}"""))
+        val rec = Recorder()
+        val r = engine.runTurn(ctx(), rec) as TurnResult.Success
+        assertEquals("찾았어요", r.response.say)
+        val firstText = rec.partials.indexOfFirst { it.isNotEmpty() }
+        assertTrue("partials=${rec.partials}", firstText >= 0)
+        assertTrue("리셋 신호 없음: ${rec.partials}", rec.partials.drop(firstText).contains(""))
+        assertEquals("찾았어요", rec.partials.last())
+    }
+
+    @Test
     fun toolLoopFeedsFunctionResponseBack() = runTest {
-        server.enqueue(sse("""{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"web_search","args":{"query":"원주 한우"}}}]}}]}"""))
+        server.enqueue(sse(callChunk))
         server.enqueue(textResponse("""{"say":"찾았어요","quickReplies":[],"readyToDraft":false}"""))
         val rec = Recorder()
         val r = engine.runTurn(ctx(), rec) as TurnResult.Success
         assertEquals("찾았어요", r.response.say); assertEquals(listOf("web_search"), toolCalls); assertEquals(listOf("검색 중"), rec.toolStatus)
         server.takeRequest(); val second = server.takeRequest().body.readUtf8()
         assertTrue(second.contains("\"functionResponse\"")); assertTrue(second.contains("원주 한우 주소"))
+    }
+
+    @Test
+    fun throwingToolIsReportedBackAsErrorJson() = runTest {
+        toolOverride = object : ToolExecutor {
+            override suspend fun execute(name: String, args: JsonObject, onProgress: (String) -> Unit): JsonObject = throw IllegalStateException("도구 폭발")
+        }
+        server.enqueue(sse(callChunk))
+        server.enqueue(textResponse("""{"say":"그래도 계속","quickReplies":[],"readyToDraft":false}"""))
+        val r = engine.runTurn(ctx(), Recorder()) as TurnResult.Success
+        assertEquals("그래도 계속", r.response.say)
+        server.takeRequest(); val second = server.takeRequest().body.readUtf8()
+        assertTrue(second.contains("\"error\"")); assertTrue(second.contains("도구 폭발"))
+    }
+
+    @Test
+    fun tooManyToolRoundsFails() = runTest {
+        repeat(8) { server.enqueue(sse(callChunk)) }
+        val r = engine.runTurn(ctx(), Recorder()) as TurnResult.Failure
+        assertEquals(TurnResult.Reason.BAD_RESPONSE, r.reason)
+        assertEquals(ConversationEngine.MAX_TOOL_ROUNDS, toolCalls.size)
     }
 
     @Test
@@ -171,6 +211,52 @@ class ConversationEngineTest {
         assertEquals("본문 문단", post.title)
         assertEquals("img_001", (post.blocks[1] as com.csh.blogwriter.domain.model.Block.Image).ref)
         assertTrue(r.repairs.isNotEmpty())
+    }
+
+    @Test
+    fun modelNotFoundFallsBackToNextModel() = runTest {
+        server.enqueue(error(404, "NOT_FOUND"))
+        server.enqueue(textResponse("""{"say":"라이트로 갔어요","quickReplies":[],"readyToDraft":false}"""))
+        val r = engine.runTurn(ctx(), Recorder()) as TurnResult.Success
+        assertEquals("lite", r.usedModel)
+        assertTrue(server.takeRequest().path!!.contains("flash:streamGenerateContent"))
+        assertTrue(server.takeRequest().path!!.contains("lite:streamGenerateContent"))
+    }
+
+    @Test
+    fun transientErrorRetriesSameKeyOnce() = runTest {
+        server.enqueue(error(500, "INTERNAL"))
+        server.enqueue(textResponse("""{"say":"다시 됐어요","quickReplies":[],"readyToDraft":false}"""))
+        val r = engine.runTurn(ctx(), Recorder()) as TurnResult.Success
+        assertEquals("다시 됐어요", r.response.say)
+        assertEquals("SECRET1", server.takeRequest().getHeader("x-goog-api-key"))
+        assertEquals("SECRET1", server.takeRequest().getHeader("x-goog-api-key"))
+    }
+
+    @Test
+    fun repeatedTransientErrorsFailWithNetwork() = runTest {
+        repeat(12) { server.enqueue(error(500, "INTERNAL")) }
+        val r = engine.runTurn(ctx(), Recorder()) as TurnResult.Failure
+        assertEquals(TurnResult.Reason.NETWORK, r.reason)
+        assertTrue(server.requestCount >= 3)
+    }
+
+    @Test
+    fun unparsableTextRetriesAtTemperatureZeroThenFails() = runTest {
+        repeat(2) { server.enqueue(sse(chunk("이건 JSON 이 아니에요"))) }
+        val r = engine.runTurn(ctx(), Recorder()) as TurnResult.Failure
+        assertEquals(TurnResult.Reason.BAD_RESPONSE, r.reason)
+        assertEquals(2, server.requestCount)
+        server.takeRequest(); assertTrue(server.takeRequest().body.readUtf8().contains("\"temperature\":0.0"))
+    }
+
+    @Test
+    fun truncatedResponseFailsWithoutRetry() = runTest {
+        server.enqueue(sse(chunk("""{"say":"길게 쓰다가 잘""", finishReason = "MAX_TOKENS")))
+        val r = engine.runTurn(ctx(), Recorder()) as TurnResult.Failure
+        assertEquals(TurnResult.Reason.BAD_RESPONSE, r.reason)
+        assertEquals("응답이 너무 길어 잘렸어요", r.detail)
+        assertEquals(1, server.requestCount)
     }
 
     @Test

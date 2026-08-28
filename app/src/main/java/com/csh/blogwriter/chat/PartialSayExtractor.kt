@@ -42,6 +42,10 @@ object PartialSayExtractor {
             val k = text.indexOf(KEY, from)
             if (k < 0) return null
             from = k + KEY.length
+            // 문자열 값 안에 우연히 들어간 "say" 는 무시 — 키라면 앞이 '{' 또는 ',' 여야 한다.
+            var p = k - 1
+            while (p >= 0 && text[p].isWhitespace()) p--
+            if (p < 0 || (text[p] != '{' && text[p] != ',')) continue
             var i = from
             while (i < text.length && text[i].isWhitespace()) i++
             if (i >= text.length || text[i] != ':') continue
