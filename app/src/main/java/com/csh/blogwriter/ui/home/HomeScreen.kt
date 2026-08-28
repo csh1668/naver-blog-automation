@@ -1,5 +1,6 @@
 package com.csh.blogwriter.ui.home
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
@@ -11,7 +12,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.csh.blogwriter.ui.components.AppTopBar
@@ -20,6 +23,7 @@ import com.csh.blogwriter.ui.components.BottomCta
 import com.csh.blogwriter.ui.components.InlineBanner
 import com.csh.blogwriter.ui.components.ListRow
 import com.csh.blogwriter.ui.components.ScreenScaffold
+import com.csh.blogwriter.ui.components.WeakButton
 import com.csh.blogwriter.ui.theme.AppSpacing
 import com.csh.blogwriter.ui.theme.AppTheme
 
@@ -33,6 +37,8 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val updateInfo by viewModel.updateInfo.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     ScreenScaffold(
         topBar = {
             AppTopBar(actions = {
@@ -44,6 +50,14 @@ fun HomeScreen(
         bottom = { BottomCta("새 글 쓰기", onClick = { if (state.hasBlogId) onNewPost() else onLogin("compose") }) },
     ) {
         Spacer(Modifier.height(AppSpacing.section))
+        updateInfo?.let { info ->
+            InlineBanner("새 버전(${info.tag})이 나왔어요 — 받으러 가기", BannerKind.Info) {
+                context.startActivity(Intent(Intent.ACTION_VIEW, info.htmlUrl.toUri()))
+            }
+            Spacer(Modifier.height(AppSpacing.md))
+            WeakButton("닫기", onClick = viewModel::dismissUpdate)
+            Spacer(Modifier.height(AppSpacing.lg))
+        }
         Text("오늘은 어떤 이야기를\n올릴까요?", style = AppTheme.typography.title1, color = AppTheme.colors.textPrimary)
         Spacer(Modifier.height(AppSpacing.section))
         if (state.pendingJobId != null) {

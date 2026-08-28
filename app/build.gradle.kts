@@ -24,6 +24,7 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "GITHUB_REPO", "\"csh1668/naver-blog-automation\"")
     }
 
     val releaseKeystorePath = System.getenv("KEYSTORE_PATH") ?: propOrNull("storeFile")
@@ -94,6 +95,7 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.androidx.exifinterface)
     implementation(libs.androidx.webkit)
+    implementation(libs.okhttp)
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)
 
@@ -101,6 +103,7 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.turbine)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.okhttp.mockwebserver)
     testImplementation(platform(libs.compose.bom))
     testImplementation(libs.compose.ui.test.junit4)
 }
