@@ -11,6 +11,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
 import javax.inject.Inject
 import kotlin.math.max
 
@@ -40,17 +41,13 @@ class ImagePreparer @Inject constructor(@ApplicationContext private val context:
             val file = File(path)
             if (!file.exists()) return null
             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(path, opts)
+            FileInputStream(file).use { BitmapFactory.decodeStream(it, null, opts) }
             PreparedImage("img_%03d".format(index + 1), file, opts.outWidth, opts.outHeight)
         }
         return images
     }
 
-    fun clear(jobId: String) {
-        val d = dir(jobId)
-        // Windows(JVM)에서 방금 읽은 파일이 네이티브 디코더에 의해 잠시 잠길 수 있어 1회 GC 후 재시도한다.
-        if (!d.deleteRecursively()) { System.gc(); d.deleteRecursively() }
-    }
+    fun clear(jobId: String) { dir(jobId).deleteRecursively() }
 
     private fun decodeScaled(uri: Uri): Bitmap {
         val resolver = context.contentResolver
