@@ -1,11 +1,14 @@
 package com.csh.blogwriter.llm
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -44,5 +47,33 @@ class ApiKeyStoreTest {
         s.add(listOf("AQ.Ab8RN6abcdefghijklmnopqrstu"))
         val raw = ds.data.first().asMap().values.joinToString()
         assertFalse(raw.contains("AQ.Ab8RN6"))
+    }
+
+    @Test
+    fun unreadableBlobIsExposedAndNotOverwrittenUntilReset() = runTest {
+        val ds = PreferenceDataStoreFactory.create { folder.newFile("k3.preferences_pb") }
+        val blobKey = stringPreferencesKey("api_keys_blob")
+        ds.edit { it[blobKey] = "not-valid-base64-or-cipher-output!!" }
+        val s = DataStoreApiKeyStore(ds, cipher)
+
+        assertTrue(s.unreadable.first())
+        assertEquals(0, s.keysOnce().size)
+        try {
+            s.add(listOf("AQ.Ab8RN6abcdefghijklmnopqrstu"))
+            fail("expected IllegalStateException when store is unreadable")
+        } catch (e: IllegalStateException) {
+            // expected: must not silently overwrite the unreadable blob
+        }
+
+        s.resetAll()
+        assertFalse(s.unreadable.first())
+        val added = s.add(listOf("AQ.Ab8RN6abcdefghijklmnopqrstu"))
+        assertEquals(1, added.size)
+    }
+
+    @Test
+    fun apiKeyToStringDoesNotLeakSecret() {
+        val key = ApiKey("id1", "AQ.Ab8RN6abcdefghijklmnopqrstu", 0L)
+        assertFalse(key.toString().contains("AQ.Ab8RN6abcdefghijklmnopqrstu"))
     }
 }
