@@ -43,6 +43,9 @@ import com.csh.blogwriter.ui.theme.AppTheme
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
+/** 빈 채팅(새 글)의 가운데 입력창 높이. */
+private val HeroMinHeight = 132.dp
+
 /** 하단 입력줄: 사진 붙이기 · 텍스트 · 마이크 · 보내기. */
 @Composable
 fun Composer(
@@ -54,6 +57,8 @@ fun Composer(
     placeholder: String,
     /** 초안이 나온 뒤에는 사진을 더 붙일 수 없다 (증분 업로드는 SP3). */
     canAttach: Boolean = true,
+    /** 빈 채팅에서 화면 가운데에 크게 놓일 때. 입력창만 높아지고 버튼 배치는 같다. */
+    hero: Boolean = false,
 ) {
     val c = AppTheme.colors
     val context = LocalContext.current
@@ -101,11 +106,12 @@ fun Composer(
             value = text,
             onValueChange = onTextChange,
             enabled = enabled,
-            modifier = Modifier.weight(1f).defaultMinSize(minHeight = AppSpacing.ctaHeight),
+            modifier = Modifier.weight(1f)
+                .defaultMinSize(minHeight = if (hero) HeroMinHeight else AppSpacing.ctaHeight),
             textStyle = AppTheme.typography.body1.copy(color = c.textPrimary),
             placeholder = { Text(placeholder, style = AppTheme.typography.body1, color = c.textTertiary) },
             shape = RoundedCornerShape(24.dp),
-            maxLines = 5,
+            maxLines = if (hero) 8 else 5,
             colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = c.surfaceWeak, unfocusedContainerColor = c.surfaceWeak,
                 disabledContainerColor = c.surfaceWeak,

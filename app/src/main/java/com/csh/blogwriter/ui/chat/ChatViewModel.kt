@@ -25,6 +25,8 @@ import com.csh.blogwriter.data.repo.SessionStatus
 import com.csh.blogwriter.domain.model.Block
 import com.csh.blogwriter.domain.model.PostContent
 import com.csh.blogwriter.llm.ApiKeyStore
+import com.csh.blogwriter.update.UpdateChecker
+import com.csh.blogwriter.update.UpdateInfo
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -33,6 +35,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -56,6 +59,7 @@ class ChatViewModel @Inject constructor(
     private val memory: MemoryRepository,
     private val publishedHook: PublishedHook,
     private val settings: SettingsStore,
+    private val updateChecker: UpdateChecker,
 ) : ViewModel() {
 
     companion object {
@@ -70,6 +74,8 @@ class ChatViewModel @Inject constructor(
         const val GATE_FIX = "고쳐 달라고 하기"
         /** 목표 글자 수에서 이만큼은 봐준다. */
         private const val LENGTH_TOLERANCE = 0.1
+        /** 새 버전 확인은 이 간격 안에서는 건너뛴다 (FR-12). */
+        private const val UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
         private val DRAFT_WORDS = Regex("초안|써 줘|작성해")
     }
 
@@ -83,19 +89,47 @@ class ChatViewModel @Inject constructor(
     private val _reinject = MutableSharedFlow<PostContent>(extraBufferCapacity = 4)
     val reinject: SharedFlow<PostContent> = _reinject
 
+    /** 새 버전 배너 (FR-12). 켤 때마다 묻지 않도록 6시간에 한 번만 확인한다. */
+    private val _updateInfo = MutableStateFlow<UpdateInfo?>(null)
+    val updateInfo: StateFlow<UpdateInfo?> = _updateInfo.asStateFlow()
+
     private var messagesJob: Job? = null
     /** 돌고 있는 턴. 대화를 바꾸면 취소한다 — 늦게 온 답이 엉뚱한 대화에 붙지 않도록. */
     private var turnJob: Job? = null
     private var readyToDraft = false
     private var lastDraftTurn = false
+    /** 화면이 처음 붙을 때만 대화를 연다 — 회전으로 다시 만들어져도 보던 대화를 잃지 않게. */
+    private var openedOnce = false
 
     init {
         viewModelScope.launch {
             keyStore.hasUsableKey.collect { has -> _uiState.update { it.copy(hasKey = has) } }
         }
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            if (now - settings.lastUpdateCheckAtOnce() < UPDATE_CHECK_INTERVAL_MS) return@launch
+            settings.setLastUpdateCheckAt(now)
+            val info = updateChecker.checkForUpdate() ?: return@launch
+            if (info.tag != settings.dismissedUpdateTagOnce()) _updateInfo.value = info
+        }
     }
 
-    /** [sessionId] 가 null 이면 새 대화를 시작한다 ("새 글 쓰기"). */
+    fun dismissUpdate() {
+        val tag = _updateInfo.value?.tag ?: return
+        _updateInfo.value = null
+        viewModelScope.launch { settings.setDismissedUpdateTag(tag) }
+    }
+
+    /** 화면이 처음 붙을 때 한 번. 회전으로 화면이 다시 만들어져도 열려 있던 대화를 그대로 둔다. */
+    fun openInitial(sessionId: String?) {
+        if (openedOnce) return
+        open(sessionId)
+    }
+
+    /**
+     * [sessionId] 가 null 이면 "새 글" 빈 상태로 둔다 — 대화는 첫 메시지(또는 첫 사진)를 보낼 때 만든다.
+     * 미리 만들면 아무것도 쓰지 않은 빈 대화가 목록에 쌓인다.
+     */
     fun open(sessionId: String?) {
         if (sessionId != null && _uiState.value.session?.id == sessionId) return
         // 이전 대화의 턴은 여기서 끝낸다. 취소된 턴은 아무것도 저장하지 않는다.
@@ -103,8 +137,20 @@ class ChatViewModel @Inject constructor(
         turnJob = null
         readyToDraft = false
         lastDraftTurn = false
+        openedOnce = true
+        messagesJob?.cancel()
+        messagesJob = null
+        if (sessionId == null) {
+            _uiState.value = ChatUiState(hasKey = _uiState.value.hasKey)
+            return
+        }
         viewModelScope.launch {
-            val session = detachVanishedJob(sessionId?.let { chatRepo.getSession(it) } ?: chatRepo.createSession())
+            // 없는 대화를 가리키면(지워졌거나 잘못된 id) "새 글" 로 돌아간다 — 반쯤 죽은 화면을 남기지 않게.
+            val stored = chatRepo.getSession(sessionId) ?: run {
+                _uiState.value = ChatUiState(hasKey = _uiState.value.hasKey)
+                return@launch
+            }
+            val session = detachVanishedJob(stored)
             val photos = restoreAttachments(session.id)
             // 새 상태로 통째로 갈아 끼운다 — thinking·streamingSay·toolStatus·칩이 함께 초기화된다.
             _uiState.value = ChatUiState(
@@ -115,10 +161,23 @@ class ChatViewModel @Inject constructor(
                 panelJobId = session.pendingJobId,
                 hasKey = _uiState.value.hasKey,
             )
-            messagesJob?.cancel()
-            messagesJob = viewModelScope.launch {
-                chatRepo.observeMessages(session.id).collect { list -> _uiState.update { it.copy(messages = list) } }
-            }
+            observeMessages(session.id)
+        }
+    }
+
+    /** 지금 열려 있는 대화. 없으면(= "새 글") 여기서 만든다 — 첫 메시지·첫 사진 때만 생긴다. */
+    private suspend fun ensureSession(): ChatSession {
+        _uiState.value.session?.let { return it }
+        val session = chatRepo.createSession()
+        _uiState.update { it.copy(session = session) }
+        observeMessages(session.id)
+        return session
+    }
+
+    private fun observeMessages(sessionId: String) {
+        messagesJob?.cancel()
+        messagesJob = viewModelScope.launch {
+            chatRepo.observeMessages(sessionId).collect { list -> _uiState.update { it.copy(messages = list) } }
         }
     }
 
@@ -158,7 +217,6 @@ class ChatViewModel @Inject constructor(
 
     fun attachPhotos(uris: List<String>) {
         if (uris.isEmpty()) return
-        val session = _uiState.value.session ?: return
         // 초안이 나온 뒤에 붙인 사진은 아직 에디터에 올라가 있지 않다 — 다음 수정본이 그 ref 를 쓰면
         // 주입이 통째로 실패한다. 증분 업로드는 SP3, SP2 에서는 아예 막는다.
         if (_uiState.value.panelJobId != null) {
@@ -170,6 +228,8 @@ class ChatViewModel @Inject constructor(
         val fresh = uris.distinct().filterNot { it in already }
         if (fresh.isEmpty()) return
         viewModelScope.launch {
+            // 말보다 사진을 먼저 붙였으면 여기서 대화가 생긴다.
+            val session = ensureSession()
             val prepared = photoAttachments.prepare(session.id, _uiState.value.attachments.size, fresh)
             // 읽지 못한 사진을 들고 있으면 나중에 발행 단계에서 통째로 실패한다 — 여기서 뺀다.
             val (usable, unreadable) = prepared.partition { it.thumb != null }
@@ -278,15 +338,16 @@ class ChatViewModel @Inject constructor(
     // ---- 턴 ----
 
     private fun runTurn(userText: String?, draftTurn: Boolean) {
-        val session = _uiState.value.session ?: return
         if (_uiState.value.thinking) return
         lastDraftTurn = draftTurn
         // 연타로 두 턴이 겹치지 않게 코루틴을 띄우기 전에 잠근다.
         _uiState.update {
             it.copy(thinking = true, streamingSay = null, toolStatus = null, quickReplies = emptyList(), error = null, draftGate = null)
         }
-        val sessionId = session.id
         turnJob = viewModelScope.launch {
+            // "새 글" 의 첫 턴이면 여기서 대화가 생긴다.
+            val session = ensureSession()
+            val sessionId = session.id
             try {
                 if (!keyStore.hasUsableKey.first()) {
                     system(sessionId, NO_KEY)

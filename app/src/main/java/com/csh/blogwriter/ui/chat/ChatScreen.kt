@@ -1,5 +1,6 @@
 package com.csh.blogwriter.ui.chat
 
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateDpAsState
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -51,8 +53,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import android.os.Bundle
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.hilt.lifecycle.viewmodel.compose.rememberHiltViewModelFactory
@@ -97,15 +101,16 @@ private val TRAY_MAX_HEIGHT = 240.dp
 @Composable
 fun ChatScreen(
     sessionId: String?,
-    onBack: () -> Unit,
     onOpenMemory: () -> Unit,
+    onAdmin: () -> Unit,
     onSessionExpired: (jobId: String) -> Unit,
     onFailed: (jobId: String) -> Unit,
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
     val ui by viewModel.uiState.collectAsStateWithLifecycle()
     val sessions by viewModel.sessions.collectAsStateWithLifecycle()
-    LaunchedEffect(sessionId) { viewModel.open(sessionId) }
+    // 회전으로 화면이 다시 만들어져도 보던 대화를 그대로 둔다 — 뷰모델이 첫 진입만 받는다.
+    LaunchedEffect(sessionId) { viewModel.openInitial(sessionId) }
 
     // 패널을 한 번 연 뒤에는 접어도 컴포지션에 남겨 둔다 — 빠지면 WebView 가 파괴돼 처음부터 다시 올려야 한다.
     // 대화를 바꾸면 처음부터 다시 센다: 안 그러면 이어 쓰던 글이 있는 대화를 열자마자
@@ -144,6 +149,7 @@ fun ChatScreen(
                         onToggle = viewModel::toggleList,
                         onDelete = viewModel::deleteSession,
                         onRename = viewModel::renameSession,
+                        onSettings = onAdmin,
                     )
                 }
                 ChatPane(
@@ -152,7 +158,6 @@ fun ChatScreen(
                     viewModel = viewModel,
                     panelStatus = panelStatus,
                     onOpenMemory = onOpenMemory,
-                    onBack = onBack,
                     onOpenSessions = null,
                 )
                 if (panelMountedNow) {
@@ -181,6 +186,7 @@ fun ChatScreen(
                             onToggle = { scope.launch { drawerState.close() } },
                             onDelete = viewModel::deleteSession,
                             onRename = viewModel::renameSession,
+                            onSettings = { scope.launch { drawerState.close() }; onAdmin() },
                         )
                     }
                 },
@@ -191,7 +197,6 @@ fun ChatScreen(
                     viewModel = viewModel,
                     panelStatus = panelStatus,
                     onOpenMemory = onOpenMemory,
-                    onBack = onBack,
                     onOpenSessions = { scope.launch { drawerState.open() } },
                 )
             }
@@ -217,7 +222,7 @@ fun ChatScreen(
     }
 }
 
-/** 가운데 채팅: 상단 바 + 말풍선 목록 + 빠른 답장 + 입력줄. */
+/** 가운데 채팅: 상단 바 + 말풍선 목록 + 빠른 답장 + 입력줄. 아직 아무 말도 안 했으면 큰 제목 + 가운데 입력창. */
 @Composable
 private fun ChatPane(
     modifier: Modifier,
@@ -225,10 +230,11 @@ private fun ChatPane(
     viewModel: ChatViewModel,
     panelStatus: String?,
     onOpenMemory: () -> Unit,
-    onBack: () -> Unit,
     onOpenSessions: (() -> Unit)?,
 ) {
     val c = AppTheme.colors
+    val context = LocalContext.current
+    val updateInfo by viewModel.updateInfo.collectAsStateWithLifecycle()
     var draft by remember { mutableStateOf("") }
     /** 방금 보냈으면 읽던 자리와 상관없이 맨 아래로 따라간다. */
     var justSent by remember { mutableStateOf(false) }
@@ -246,13 +252,10 @@ private fun ChatPane(
 
     Column(modifier.statusBarsPadding().navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = AppSpacing.sm), verticalAlignment = Alignment.CenterVertically) {
+            // 좁은 화면에서만 대화 기록 버튼이 필요하다 — 넓으면 왼쪽에 늘 붙어 있다.
             if (onOpenSessions != null) {
                 IconButton(onClick = onOpenSessions, modifier = Modifier.size(AppSpacing.touchTarget)) {
                     Icon(Icons.AutoMirrored.Rounded.List, contentDescription = "대화 기록", tint = c.textSecondary)
-                }
-            } else {
-                IconButton(onClick = onBack, modifier = Modifier.size(AppSpacing.touchTarget)) {
-                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "뒤로 가기", tint = c.textSecondary)
                 }
             }
             Text(
@@ -273,6 +276,16 @@ private fun ChatPane(
                 }
             }
         }
+        // 새 버전 알림 (FR-12). 닫으면 그 태그는 다시 뜨지 않는다.
+        updateInfo?.let { info ->
+            Column(Modifier.padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
+                InlineBanner("새 버전(${info.tag})이 나왔어요 — 받으러 가기", BannerKind.Info) {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, info.htmlUrl.toUri()))
+                }
+                Spacer(Modifier.height(AppSpacing.sm))
+                WeakButton("닫기", onClick = viewModel::dismissUpdate)
+            }
+        }
         if (!ui.hasKey) {
             Box(Modifier.padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
                 InlineBanner(ChatViewModel.NO_KEY, BannerKind.Warning)
@@ -289,46 +302,70 @@ private fun ChatPane(
                 InlineBanner("$panelStatus — 열기", BannerKind.Info, onClick = viewModel::togglePanel)
             }
         }
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = AppSpacing.lg),
-            verticalArrangement = Arrangement.spacedBy(AppSpacing.xs),
-        ) {
-            items(ui.messages, key = { it.id }) { message -> MessageItem(message, ui.panelOpen, viewModel) }
-            ui.streamingSay?.let { partial -> item { MessageBubble(partial, mine = false) } }
-            if (ui.thinking) item { ToolStatusLine(ui.toolStatus) }
-        }
-        ui.draftGate?.let { gate -> DraftGateCard(gate, viewModel) }
-        QuickReplyChips(ui.quickReplies) { justSent = true; viewModel.sendQuickReply(it) }
-        AttachmentTray(ui.tray, viewModel)
-        // 계획이 있고 아직 초안이 없는 동안에는 초안 버튼이 입력창 위에 늘 걸려 있다.
-        if (ui.plan != null && ui.panelJobId == null && !ui.thinking && ui.draftGate == null) {
-            Box(Modifier.padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
-                BottomCta(
-                    ChatViewModel.DRAFT_CHIP,
-                    onClick = { justSent = true; viewModel.requestDraft() },
-                    enabled = ui.hasKey,
-                )
-            }
-        }
-        // 초안이 나온 뒤 붙인 사진은 에디터에 올라가 있지 않아 다음 수정본 주입이 깨진다 — 버튼을 막고 이유를 알려 준다.
-        if (ui.panelJobId != null) {
-            Text(
-                ChatViewModel.NO_PHOTO_AFTER_DRAFT,
-                style = AppTheme.typography.caption,
-                color = c.textTertiary,
-                modifier = Modifier.padding(horizontal = AppSpacing.lg),
+        val composer: @Composable (Boolean) -> Unit = { hero ->
+            Composer(
+                text = draft,
+                onTextChange = { draft = it },
+                onSend = { justSent = true; viewModel.send(draft); draft = "" },
+                onAttach = viewModel::attachPhotos,
+                enabled = ui.hasKey && !ui.thinking,
+                placeholder = if (ui.thinking) "글을 구상하고 있어요" else "오늘 있었던 일을 들려주세요",
+                canAttach = ui.panelJobId == null,
+                hero = hero,
             )
         }
-        Composer(
-            text = draft,
-            onTextChange = { draft = it },
-            onSend = { justSent = true; viewModel.send(draft); draft = "" },
-            onAttach = viewModel::attachPhotos,
-            enabled = ui.hasKey && !ui.thinking,
-            placeholder = if (ui.thinking) "글을 구상하고 있어요" else "오늘 있었던 일을 들려주세요",
-            canAttach = ui.panelJobId == null,
-        )
+        // 아직 말이 오가지 않은 새 글(사진만 붙여 둔 것도 포함) — 목록 대신 큰 제목과 가운데 입력창을 보여 준다.
+        if (!ui.thinking && ui.messages.none { it.kind != MessageKind.PHOTOS }) {
+            Column(
+                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Column(Modifier.widthIn(max = AppSpacing.contentMaxWidth).padding(vertical = AppSpacing.lg)) {
+                    Text(
+                        "오늘은 어떤 이야기를\n올릴까요?",
+                        style = AppTheme.typography.display, color = c.textPrimary,
+                        modifier = Modifier.padding(horizontal = AppSpacing.lg),
+                    )
+                    Spacer(Modifier.height(AppSpacing.section))
+                    AttachmentTray(ui.tray, viewModel)
+                    composer(true)
+                }
+            }
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = AppSpacing.lg),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.xs),
+            ) {
+                items(ui.messages, key = { it.id }) { message -> MessageItem(message, ui.panelOpen, viewModel) }
+                ui.streamingSay?.let { partial -> item { MessageBubble(partial, mine = false) } }
+                if (ui.thinking) item { ToolStatusLine(ui.toolStatus) }
+            }
+            ui.draftGate?.let { gate -> DraftGateCard(gate, viewModel) }
+            QuickReplyChips(ui.quickReplies) { justSent = true; viewModel.sendQuickReply(it) }
+            AttachmentTray(ui.tray, viewModel)
+            // 계획이 있고 아직 초안이 없는 동안에는 초안 버튼이 입력창 위에 늘 걸려 있다.
+            if (ui.plan != null && ui.panelJobId == null && !ui.thinking && ui.draftGate == null) {
+                Box(Modifier.padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
+                    BottomCta(
+                        ChatViewModel.DRAFT_CHIP,
+                        onClick = { justSent = true; viewModel.requestDraft() },
+                        enabled = ui.hasKey,
+                    )
+                }
+            }
+            // 초안이 나온 뒤 붙인 사진은 에디터에 올라가 있지 않아 다음 수정본 주입이 깨진다 — 버튼을 막고 이유를 알려 준다.
+            if (ui.panelJobId != null) {
+                Text(
+                    ChatViewModel.NO_PHOTO_AFTER_DRAFT,
+                    style = AppTheme.typography.caption,
+                    color = c.textTertiary,
+                    modifier = Modifier.padding(horizontal = AppSpacing.lg),
+                )
+            }
+            composer(false)
+        }
     }
 }
 

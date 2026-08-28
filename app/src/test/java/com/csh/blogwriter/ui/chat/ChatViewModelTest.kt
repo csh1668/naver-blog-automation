@@ -26,6 +26,8 @@ import com.csh.blogwriter.domain.model.PostContent
 import com.csh.blogwriter.domain.model.Run
 import com.csh.blogwriter.llm.ApiKey
 import com.csh.blogwriter.llm.ApiKeyStore
+import com.csh.blogwriter.update.UpdateChecker
+import com.csh.blogwriter.update.UpdateInfo
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -147,8 +149,27 @@ class ChatViewModelTest {
     }
 
     private class FakeSettingsStore : SettingsStore {
+        val lastCheckAt = MutableStateFlow(0L)
+        val dismissedTag = MutableStateFlow<String?>(null)
+
         override val blogId: Flow<String?> = flowOf(null)
         override suspend fun setBlogId(id: String?) {}
+
+        override val lastUpdateCheckAt: Flow<Long> = lastCheckAt
+        override suspend fun setLastUpdateCheckAt(timestamp: Long) { lastCheckAt.value = timestamp }
+
+        override val dismissedUpdateTag: Flow<String?> = dismissedTag
+        override suspend fun setDismissedUpdateTag(tag: String?) { dismissedTag.value = tag }
+    }
+
+    /** 새 버전 확인기. [result] 를 돌려주고 몇 번 불렸는지 센다. */
+    private class FakeUpdateChecker(private val result: UpdateInfo?) : UpdateChecker {
+        var callCount = 0
+            private set
+        override suspend fun checkForUpdate(repo: String, currentVersion: String): UpdateInfo? {
+            callCount++
+            return result
+        }
     }
 
     private class RecordingPublishedHook : PublishedHook {
@@ -185,9 +206,10 @@ class ChatViewModelTest {
     private val memory = FakeMemoryRepository(listOf(MemoryItem(1, MemoryKind.STYLE, "존댓말로 써요", "chat", 0, true, null)))
     private val hook = RecordingPublishedHook()
     private var photos = FakePhotoAttachments()
+    private val settings = FakeSettingsStore()
 
-    private fun newViewModel(hasKey: Boolean = true): ChatViewModel =
-        ChatViewModel(chatRepo, runner, pendingJobs, photos, FakeApiKeyStore(hasKey), memory, hook, FakeSettingsStore())
+    private fun newViewModel(hasKey: Boolean = true, checker: UpdateChecker = FakeUpdateChecker(null)): ChatViewModel =
+        ChatViewModel(chatRepo, runner, pendingJobs, photos, FakeApiKeyStore(hasKey), memory, hook, settings, checker)
             .also { viewModel = it }
 
     /** 품질 게이트를 그냥 통과하는 초안 — 게이트 자체를 보는 테스트는 [longPost] 로 길이를 정한다. */
@@ -204,6 +226,117 @@ class ChatViewModelTest {
 
     @Before fun setUp() { Dispatchers.setMain(StandardTestDispatcher()) }
     @After fun tearDown() { Dispatchers.resetMain() }
+
+    // ---- 새 글: 대화는 첫 메시지 때 만든다 ----
+
+    /** 시작 화면(빈 채팅)이나 목록의 "새 글" 은 빈 대화를 만들지 않는다 — 회전으로 다시 열려도 마찬가지. */
+    @Test
+    fun openingANewPostDoesNotCreateASession() = runTest {
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+
+        assertNull(vm.uiState.value.session)
+        assertTrue(chatRepo.sessions.value.isEmpty())
+
+        vm.open(null); advanceUntilIdle()
+        assertTrue(chatRepo.sessions.value.isEmpty())
+    }
+
+    /** 첫 메시지를 보내면 그때 대화가 만들어지고, 메시지는 그 대화에 저장된다. */
+    @Test
+    fun theFirstSendCreatesTheSessionAndStoresTheMessageThere() = runTest {
+        turns += TurnResult.Success(TurnResponse("좋아요"), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+
+        vm.send("원주 한우 다녀왔어요"); advanceUntilIdle()
+
+        val session = vm.uiState.value.session
+        assertNotNull(session)
+        assertEquals(listOf(session!!.id), chatRepo.sessions.value.map { it.id })
+        assertEquals(
+            listOf(MessageRole.USER to MessageKind.TEXT, MessageRole.ASSISTANT to MessageKind.TEXT),
+            chatRepo.of(session.id).map { it.role to it.kind },
+        )
+        // 화면도 그 대화의 메시지를 보고 있어야 한다.
+        assertEquals(chatRepo.of(session.id), vm.uiState.value.messages)
+    }
+
+    /** 말보다 사진을 먼저 붙여도 그때 대화가 만들어진다. */
+    @Test
+    fun theFirstAttachPhotosCreatesTheSession() = runTest {
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+
+        vm.attachPhotos(listOf("a", "b")); advanceUntilIdle()
+
+        val session = vm.uiState.value.session
+        assertNotNull(session)
+        assertEquals(listOf(session!!.id), chatRepo.sessions.value.map { it.id })
+        assertEquals(listOf(MessageKind.PHOTOS), chatRepo.of(session.id).map { it.kind })
+        assertEquals(listOf("a", "b"), vm.uiState.value.attachments.map { it.uri })
+    }
+
+    /** 화면이 다시 만들어져도(회전) 열려 있던 대화는 그대로다 — 첫 진입에만 연다. */
+    @Test
+    fun openInitialOnlyOpensOnce() = runTest {
+        turns += TurnResult.Success(TurnResponse("좋아요"), emptyList(), "flash")
+        val vm = newViewModel(); vm.openInitial(null); advanceUntilIdle()
+        vm.send("원주 한우 다녀왔어요"); advanceUntilIdle()
+        val sessionId = vm.uiState.value.session!!.id
+
+        vm.openInitial(null); advanceUntilIdle()
+
+        assertEquals(sessionId, vm.uiState.value.session?.id)
+        assertEquals(1, chatRepo.sessions.value.size)
+    }
+
+    // ---- 새 버전 배너 (FR-12) ----
+
+    @Test
+    fun throttledWithinSixHoursSkipsCheck() = runTest {
+        settings.lastCheckAt.value = System.currentTimeMillis()
+        val checker = FakeUpdateChecker(UpdateInfo("v9.9.9", "https://example.com"))
+
+        val vm = newViewModel(checker = checker)
+        advanceUntilIdle()
+
+        assertEquals(0, checker.callCount)
+        assertNull(vm.updateInfo.value)
+    }
+
+    @Test
+    fun dismissedTagHidesBanner() = runTest {
+        settings.dismissedTag.value = "v9.9.9"
+        val checker = FakeUpdateChecker(UpdateInfo("v9.9.9", "https://example.com"))
+
+        val vm = newViewModel(checker = checker)
+        advanceUntilIdle()
+
+        assertEquals(1, checker.callCount)
+        assertNull(vm.updateInfo.value)
+    }
+
+    @Test
+    fun newTagShowsBanner() = runTest {
+        val checker = FakeUpdateChecker(UpdateInfo("v9.9.9", "https://example.com"))
+
+        val vm = newViewModel(checker = checker)
+        advanceUntilIdle()
+
+        assertEquals(UpdateInfo("v9.9.9", "https://example.com"), vm.updateInfo.value)
+    }
+
+    @Test
+    fun dismissUpdateClearsBannerAndRemembersTag() = runTest {
+        val checker = FakeUpdateChecker(UpdateInfo("v9.9.9", "https://example.com"))
+        val vm = newViewModel(checker = checker)
+        advanceUntilIdle()
+        assertEquals(UpdateInfo("v9.9.9", "https://example.com"), vm.updateInfo.value)
+
+        vm.dismissUpdate()
+        advanceUntilIdle()
+
+        assertNull(vm.updateInfo.value)
+        assertEquals("v9.9.9", settings.dismissedTag.value)
+    }
 
     @Test
     fun sendStoresUserAndAssistantMessagesAndQuickReplies() = runTest {
@@ -298,19 +431,18 @@ class ChatViewModelTest {
         turns += TurnResult.Success(TurnResponse("늦게 온 답", plan = PLAN), emptyList(), "flash")
         gate = CompletableDeferred()
         val vm = newViewModel(); vm.open(null); advanceUntilIdle()
-        val first = vm.uiState.value.session!!.id
 
         vm.send("첫 대화 이야기"); advanceUntilIdle()
+        val first = vm.uiState.value.session!!.id
         assertTrue(vm.uiState.value.thinking)
 
+        // "새 글" 로 옮긴다 — 빈 대화는 만들지 않으므로 목록에는 여전히 하나뿐이다.
         vm.open(null); advanceUntilIdle()
-        val second = vm.uiState.value.session!!.id
-        assertNotEquals(first, second)
+        assertNull(vm.uiState.value.session)
+        assertEquals(listOf(first), chatRepo.sessions.value.map { it.id })
 
         gate!!.complete(Unit); advanceUntilIdle()
 
-        // 새 대화에는 아무것도 들어오지 않는다.
-        assertTrue(chatRepo.of(second).isEmpty())
         // 원래 대화에는 보낸 말만 남고 반쪽짜리 답장은 저장되지 않는다.
         assertEquals(listOf(MessageRole.USER to MessageKind.TEXT), chatRepo.of(first).map { it.role to it.kind })
         assertFalse(vm.uiState.value.thinking)
@@ -555,8 +687,8 @@ class ChatViewModelTest {
     @Test
     fun reopeningASessionRestoresUniqueRefsAndUris() = runTest {
         val vm = newViewModel(); vm.open(null); advanceUntilIdle()
-        val sessionId = vm.uiState.value.session!!.id
         vm.attachPhotos(listOf("u1", "u2")); advanceUntilIdle()
+        val sessionId = vm.uiState.value.session!!.id
         vm.removePhoto("img_001")
         vm.attachPhotos(listOf("u3")); advanceUntilIdle()
 
@@ -575,8 +707,8 @@ class ChatViewModelTest {
     fun openingASessionWhoseJobVanishedDetachesIt() = runTest {
         turns += TurnResult.Success(TurnResponse("초안이에요", post = post()), emptyList(), "flash")
         val vm = newViewModel(); vm.open(null); advanceUntilIdle()
-        val sessionId = vm.uiState.value.session!!.id
         vm.requestDraft(); advanceUntilIdle()
+        val sessionId = vm.uiState.value.session!!.id
         val jobId = vm.uiState.value.panelJobId!!
         pendingJobs.delete(jobId)
 
@@ -613,13 +745,16 @@ class ChatViewModelTest {
     @Test
     fun deletingASessionRemovesItsMessagesJobAndSwitchesAway() = runTest {
         turns += TurnResult.Success(TurnResponse("초안이에요", post = post()), emptyList(), "flash")
+        turns += TurnResult.Success(TurnResponse("다른 이야기네요"), emptyList(), "flash")
         val vm = newViewModel(); vm.open(null); advanceUntilIdle()
-        val sessionId = vm.uiState.value.session!!.id
         vm.requestDraft(); advanceUntilIdle()
+        val sessionId = vm.uiState.value.session!!.id
         val jobId = vm.uiState.value.panelJobId!!
         assertTrue(chatRepo.of(sessionId).isNotEmpty())
 
-        vm.open(null); advanceUntilIdle()          // 다른 대화를 하나 더 연다 — 지운 뒤 이리로 옮겨 가야 한다.
+        // 다른 대화를 하나 더 만든다 — 지운 뒤 이리로 옮겨 가야 한다.
+        vm.open(null); advanceUntilIdle()
+        vm.send("다른 이야기예요"); advanceUntilIdle()
         val otherId = vm.uiState.value.session!!.id
         assertNotEquals(sessionId, otherId)
         vm.open(sessionId); advanceUntilIdle()     // 지울 대화를 다시 연다.
@@ -647,9 +782,9 @@ class ChatViewModelTest {
         turns += TurnResult.Success(TurnResponse("좋아요", post = post("첫 제목")), emptyList(), "flash")
         turns += TurnResult.Success(TurnResponse("고쳤어요", post = post("둘째 제목")), emptyList(), "flash")
         val vm = newViewModel(); vm.open(null); advanceUntilIdle()
-        val sessionId = vm.uiState.value.session!!.id
 
         vm.requestDraft(); advanceUntilIdle()
+        val sessionId = vm.uiState.value.session!!.id
         assertEquals("첫 제목", vm.uiState.value.session!!.title)
 
         vm.renameSession(sessionId, "  내가 지은 이름  "); advanceUntilIdle()

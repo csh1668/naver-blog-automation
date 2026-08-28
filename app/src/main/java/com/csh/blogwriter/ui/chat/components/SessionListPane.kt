@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -59,6 +60,7 @@ fun SessionListPane(
     onToggle: () -> Unit,
     onDelete: (String) -> Unit,
     onRename: (String, String) -> Unit,
+    onSettings: () -> Unit,
 ) {
     val c = AppTheme.colors
     Column(
@@ -82,10 +84,11 @@ fun SessionListPane(
             IconButton(onClick = onNew, modifier = Modifier.size(AppSpacing.touchTarget)) {
                 Icon(Icons.Rounded.Add, contentDescription = "새 글 쓰기", tint = c.fillBrand)
             }
+            Spacer(Modifier.weight(1f))
         } else {
             WeakButton("새 글 쓰기", onClick = onNew)
             Spacer(Modifier.height(AppSpacing.md))
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
                 items(sessions, key = { it.id }) { session ->
                     SessionRow(
                         session, selected = session.id == currentId,
@@ -95,6 +98,33 @@ fun SessionListPane(
                 }
             }
         }
+        // 설정 톱니는 늘 사이드바 맨 아래 (사용자 결정 2026-08-29).
+        SettingsRow(collapsed = collapsed, onClick = onSettings)
+    }
+}
+
+@Composable
+private fun SettingsRow(collapsed: Boolean, onClick: () -> Unit) {
+    val c = AppTheme.colors
+    if (collapsed) {
+        IconButton(onClick = onClick, modifier = Modifier.size(AppSpacing.touchTarget)) {
+            Icon(Icons.Rounded.Settings, contentDescription = "설정", tint = c.textSecondary)
+        }
+        return
+    }
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = AppSpacing.touchTarget)
+            .clip(RoundedCornerShape(AppSpacing.radiusControl))
+            .clickable(onClick = onClick)
+            .padding(horizontal = AppSpacing.lg),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Rounded.Settings, contentDescription = null, tint = c.textSecondary)
+        Text(
+            "설정",
+            style = AppTheme.typography.body1, color = c.textPrimary,
+            modifier = Modifier.padding(start = AppSpacing.md),
+        )
     }
 }
 

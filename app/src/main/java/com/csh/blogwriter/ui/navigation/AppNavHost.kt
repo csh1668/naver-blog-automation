@@ -12,8 +12,6 @@ import com.csh.blogwriter.ui.admin.PromptsScreen
 import com.csh.blogwriter.ui.admin.SettingsScreen
 import com.csh.blogwriter.ui.chat.ChatScreen
 import com.csh.blogwriter.ui.fallback.FallbackScreen
-import com.csh.blogwriter.ui.history.HistoryScreen
-import com.csh.blogwriter.ui.home.HomeScreen
 import com.csh.blogwriter.ui.login.LoginScreen
 import com.csh.blogwriter.ui.memory.MemoryScreen
 import com.csh.blogwriter.ui.publish.PublishScreen
@@ -21,55 +19,42 @@ import com.csh.blogwriter.ui.publish.PublishScreen
 @Composable
 fun AppNavHost() {
     val nav = rememberNavController()
-    NavHost(navController = nav, startDestination = Routes.Home) {
-        composable<Routes.Home> {
-            HomeScreen(
-                onNewPost = { nav.navigate(Routes.Chat()) },
-                onLogin = { returnTo -> nav.navigate(Routes.Login(returnTo)) },
-                onOpenSession = { sessionId -> nav.navigate(Routes.Chat(sessionId)) },
-                onResumePending = { jobId -> nav.navigate(Routes.Publish(jobId)) },
-                onHistory = { nav.navigate(Routes.History) },
-                onAdmin = { nav.navigate(Routes.Admin) },
-            )
-        }
+    // 앱을 켜면 바로 채팅이다 (사용자 결정 2026-08-29). 다른 화면은 그 위에 쌓였다가 여기로 돌아온다.
+    NavHost(navController = nav, startDestination = Routes.Chat()) {
         composable<Routes.Login> { entry ->
             val returnTo = entry.toRoute<Routes.Login>().returnTo
             LoginScreen(
                 onBack = { nav.popBackStack() },
                 onDone = {
                     nav.popBackStack()
-                    when {
-                        returnTo == "compose" -> nav.navigate(Routes.Chat())
-                        returnTo?.startsWith("publish:") == true -> nav.navigate(Routes.Publish(returnTo.removePrefix("publish:")))
-                    }
+                    if (returnTo?.startsWith("publish:") == true) nav.navigate(Routes.Publish(returnTo.removePrefix("publish:")))
                 },
             )
         }
         composable<Routes.Chat> { entry ->
             ChatScreen(
                 sessionId = entry.toRoute<Routes.Chat>().sessionId,
-                onBack = { nav.popBackStack() },
                 onOpenMemory = { nav.navigate(Routes.Memory) },
-                onSessionExpired = { id -> nav.navigate(Routes.Login("publish:$id")) { popUpTo(Routes.Home) } },
-                onFailed = { id -> nav.navigate(Routes.Fallback(id)) { popUpTo(Routes.Home) } },
+                onAdmin = { nav.navigate(Routes.Admin) },
+                onSessionExpired = { id -> nav.navigate(Routes.Login("publish:$id")) { popUpTo<Routes.Chat>() } },
+                onFailed = { id -> nav.navigate(Routes.Fallback(id)) { popUpTo<Routes.Chat>() } },
             )
         }
         composable<Routes.Publish> {
             PublishScreen(
-                onDone = { nav.navigate(Routes.Home) { popUpTo(Routes.Home) { inclusive = true } } },
-                onSessionExpired = { id -> nav.navigate(Routes.Login("publish:$id")) { popUpTo(Routes.Home) } },
-                onFailed = { id -> nav.navigate(Routes.Fallback(id)) { popUpTo(Routes.Home) } },
-                onLeave = { nav.navigate(Routes.Home) { popUpTo(Routes.Home) { inclusive = true } } },
+                onDone = { nav.popBackStack<Routes.Chat>(inclusive = false) },
+                onSessionExpired = { id -> nav.navigate(Routes.Login("publish:$id")) { popUpTo<Routes.Chat>() } },
+                onFailed = { id -> nav.navigate(Routes.Fallback(id)) { popUpTo<Routes.Chat>() } },
+                onLeave = { nav.popBackStack<Routes.Chat>(inclusive = false) },
             )
         }
         composable<Routes.Fallback> { entry ->
             val jobId = entry.toRoute<Routes.Fallback>().jobId
             FallbackScreen(
-                onRetry = { nav.navigate(Routes.Publish(jobId)) { popUpTo(Routes.Home) } },
-                onHome = { nav.navigate(Routes.Home) { popUpTo(Routes.Home) { inclusive = true } } },
+                onRetry = { nav.navigate(Routes.Publish(jobId)) { popUpTo<Routes.Chat>() } },
+                onHome = { nav.popBackStack<Routes.Chat>(inclusive = false) },
             )
         }
-        composable<Routes.History> { HistoryScreen(onBack = { nav.popBackStack() }) }
         composable<Routes.FailureLogs> { FailureLogScreen(onBack = { nav.popBackStack() }) }
         composable<Routes.Admin> {
             SettingsScreen(
@@ -78,7 +63,7 @@ fun AppNavHost() {
                 onPrompts = { nav.navigate(Routes.Prompts) },
                 onMemory = { nav.navigate(Routes.Memory) },
                 onFailureLogs = { nav.navigate(Routes.FailureLogs) },
-                onLoggedOut = { nav.navigate(Routes.Home) { popUpTo(Routes.Home) { inclusive = true } } },
+                onLoggedOut = { nav.popBackStack<Routes.Chat>(inclusive = false) },
                 onBack = { nav.popBackStack() },
             )
         }
