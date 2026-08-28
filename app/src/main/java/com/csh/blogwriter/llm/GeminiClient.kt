@@ -1,5 +1,7 @@
 package com.csh.blogwriter.llm
 
+import android.util.Log
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -42,12 +44,17 @@ class GeminiClient(
         val req = Request.Builder().url("$baseUrl/v1beta/models/$model:streamGenerateContent?alt=sse")
             .header("x-goog-api-key", apiKey).header("Content-Type", "application/json").post(body).build()
         val call = http.newCall(req)
+        val startedAt = System.currentTimeMillis()
+        fun elapsed() = "${System.currentTimeMillis() - startedAt}ms"
+        Log.d(TAG, "stream start model=$model bodyBytes=${body.contentLength()}")
         // 수집을 멈추면 소켓을 바로 끊는다. finally 만으로는 블로킹 read 에 묶여 다음 SSE 줄(최대 120초)까지 안 풀린다.
         val cancelOnStop = currentCoroutineContext().job.invokeOnCompletion { call.cancel() }
         try {
             call.execute().use { res ->
+                Log.d(TAG, "stream response code=${res.code} protocol=${res.protocol} ${elapsed()}")
                 if (!res.isSuccessful) throw parseError(res.code, res.body?.string().orEmpty())
                 val source = res.body!!.source()
+                var chunks = 0
                 while (!source.exhausted()) {
                     currentCoroutineContext().ensureActive()
                     val line = source.readUtf8Line() ?: break
@@ -55,12 +62,15 @@ class GeminiClient(
                     val payload = line.removePrefix("data:").trim()
                     if (payload.isEmpty() || payload == "[DONE]") continue
                     if (payload.startsWith("{\"error\"")) throw parseError(500, payload)
+                    if (chunks++ == 0) Log.d(TAG, "stream first chunk ${elapsed()}")
                     emit(json.decodeFromString(GResponse.serializer(), payload))
                 }
+                Log.d(TAG, "stream end chunks=$chunks ${elapsed()}")
             }
         } catch (e: IOException) {
             // 취소로 끊긴 소켓이면 네트워크 오류가 아니라 취소로 알린다.
             currentCoroutineContext().ensureActive()
+            Log.w(TAG, "stream io error ${e.javaClass.simpleName}: ${e.message} ${elapsed()}")
             throw GeminiException(0, null, "네트워크 오류", e)
         } finally {
             cancelOnStop.dispose()
@@ -71,8 +81,11 @@ class GeminiClient(
     private fun parseError(httpCode: Int, text: String): GeminiException {
         val err = runCatching { json.parseToJsonElement(text).jsonObject["error"]!!.jsonObject }.getOrNull()
         val code = err?.get("code")?.jsonPrimitive?.content?.toIntOrNull() ?: httpCode
+        Log.w(TAG, "api error http=$httpCode code=$code status=${err?.get("status")?.jsonPrimitive?.content} body=${text.take(300)}")
         return GeminiException(code, err?.get("status")?.jsonPrimitive?.content, err?.get("message")?.jsonPrimitive?.content ?: text.take(200))
     }
+
+    private companion object { const val TAG = "GeminiClient" }
 
     suspend fun listModels(apiKey: String): KeyProbe = withContext(Dispatchers.IO) {
         val req = Request.Builder().url("$baseUrl/v1beta/models").header("x-goog-api-key", apiKey).get().build()

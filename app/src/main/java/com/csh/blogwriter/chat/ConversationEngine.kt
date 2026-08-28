@@ -1,5 +1,7 @@
 package com.csh.blogwriter.chat
 
+import android.util.Log
+
 import com.csh.blogwriter.data.repo.MemoryRepository
 import com.csh.blogwriter.data.repo.MessageKind
 import com.csh.blogwriter.data.repo.MessageRole
@@ -88,11 +90,14 @@ class ConversationEngine(
             val pick = picked.copy(model = model)
             val secret = keys.firstOrNull { it.id == pick.keyId }?.secret ?: continue
             try {
+                Log.d(TAG, "attempt $attempts/$maxAttempts model=${pick.model} key=…${pick.keyId.takeLast(4)} schema=$useSchema")
                 val result = runWithTools(secret, pick.model, system, contents, attachedRefs, policy, useSchema, tools, listener)
+                Log.d(TAG, "attempt $attempts ok model=${pick.model}")
                 rot.report(pick, KeyRotator.Outcome.SUCCESS)
                 memory.touch(memItems.map { it.id })
                 return result
             } catch (e: GeminiException) {
+                Log.w(TAG, "attempt $attempts failed model=${pick.model} kind=${e.kind} code=${e.code} msg=${e.message}")
                 lastDetail = e.message.orEmpty()
                 lastKind = e.kind
                 when (e.kind) {
@@ -110,6 +115,7 @@ class ConversationEngine(
                         else rot.report(pick, KeyRotator.Outcome.TRANSIENT)
                 }
             } catch (e: BadResponse) {
+                Log.w(TAG, "attempt $attempts bad response: ${e.message}")
                 return TurnResult.Failure(TurnResult.Reason.BAD_RESPONSE, detail = e.message.orEmpty())
             }
         }
@@ -229,3 +235,5 @@ class ConversationEngine(
         return out
     }
 }
+
+private const val TAG = "ConversationEngine"
