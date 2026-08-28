@@ -48,9 +48,28 @@ class CachedPhotoAttachments @Inject constructor(
     private fun file(sessionId: String, uri: String) =
         File(dir(sessionId), uri.hashCode().toUInt().toString(16) + ".jpg")
 
+    /**
+     * 사진 선택기가 준 content:// 권한은 이 프로세스가 살아 있는 동안만 유효하다. 앱이 죽었다 살아난 뒤
+     * 발행 파이프라인이 원본을 다시 읽으면 "permission to access picker uri" 로 실패하므로,
+     * 붙이는 순간 원본 바이트를 앱 내부 저장소로 복사하고 그 file:// 주소를 이후 모든 곳(대화 기록·발행 작업)에서 쓴다.
+     */
+    private fun durableDir(sessionId: String) = File(context.filesDir, "photos/$sessionId").apply { mkdirs() }
+
+    private fun copyOriginal(sessionId: String, uri: String): String? = try {
+        val target = File(durableDir(sessionId), uri.hashCode().toUInt().toString(16) + ".img")
+        if (!target.exists()) {
+            context.contentResolver.openInputStream(Uri.parse(uri))!!.use { input -> target.outputStream().use { input.copyTo(it) } }
+        }
+        Uri.fromFile(target).toString()
+    } catch (e: Exception) {
+        null
+    }
+
     override suspend fun prepare(sessionId: String, startIndex: Int, uris: List<String>): List<AttachedPhoto> =
         withContext(Dispatchers.IO) {
-            uris.mapIndexed { index, uri ->
+            uris.mapIndexed { index, original ->
+                // file:// 이미 우리 사본이면(재첨부 등) 그대로 쓴다.
+                val uri = if (original.startsWith("file:")) original else copyOriginal(sessionId, original) ?: original
                 val out = file(sessionId, uri)
                 val encoded = encode(uri, out)
                 encoded?.let { base64Cache[key(sessionId, uri)] = it }
@@ -71,6 +90,7 @@ class CachedPhotoAttachments @Inject constructor(
     override fun clear(sessionId: String) {
         base64Cache.keys.removeAll { it.startsWith("$sessionId|") }
         dir(sessionId).deleteRecursively()
+        durableDir(sessionId).deleteRecursively()
     }
 
     /** 원본이 이미 사라졌을 수도 있으므로(권한 만료·삭제) 실패하면 그 사진만 건너뛴다. */
