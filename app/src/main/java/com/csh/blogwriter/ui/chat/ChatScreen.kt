@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -25,6 +26,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.List
@@ -87,6 +90,7 @@ import kotlinx.coroutines.launch
 /** 가로 3단(대화 기록·채팅·에디터 패널)로 나눌 수 있는 최소 폭. */
 private val WIDE_MIN = 840.dp
 private val PANEL_MIN = 520.dp
+private val TRAY_MAX_HEIGHT = 240.dp
 
 @Composable
 fun ChatScreen(
@@ -102,9 +106,12 @@ fun ChatScreen(
     LaunchedEffect(sessionId) { viewModel.open(sessionId) }
 
     // 패널을 한 번 연 뒤에는 접어도 컴포지션에 남겨 둔다 — 빠지면 WebView 가 파괴돼 처음부터 다시 올려야 한다.
-    var panelMounted by remember { mutableStateOf(false) }
-    var panelStatus by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(ui.panelOpen, ui.panelJobId) {
+    // 대화를 바꾸면 처음부터 다시 센다: 안 그러면 이어 쓰던 글이 있는 대화를 열자마자
+    // 접힌 채로 에디터를 띄우고 사진까지 올리기 시작한다.
+    val openSessionId = ui.session?.id
+    var panelMounted by remember(openSessionId) { mutableStateOf(false) }
+    var panelStatus by remember(openSessionId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(openSessionId, ui.panelOpen, ui.panelJobId) {
         if (ui.panelOpen) panelMounted = true
         if (ui.panelJobId == null) { panelMounted = false; panelStatus = null }
     }
@@ -299,12 +306,16 @@ private fun AttachmentTray(photos: List<AttachedPhoto>, viewModel: ChatViewModel
     Column(Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
         Text("붙인 사진 ${photos.size}장", style = AppTheme.typography.caption, color = AppTheme.colors.textSecondary)
         Spacer(Modifier.height(AppSpacing.sm))
-        PhotoGrid(
-            uris = uris,
-            onRemove = { uri -> photos.firstOrNull { it.uri == uri.toString() }?.let { viewModel.removePhoto(it.ref) } },
-            onMove = { from, to -> viewModel.movePhoto(from, to) },
-            columns = 5,
-        )
+        // 많이 고르면 사진판이 화면을 다 먹는다 — 높이를 묶고 그 안에서 넘긴다.
+        Box(Modifier.heightIn(max = TRAY_MAX_HEIGHT).verticalScroll(rememberScrollState())) {
+            PhotoGrid(
+                uris = uris,
+                // 위치는 사진판 기준으로 그대로 넘긴다 (뷰모델이 안 보낸 사진 시작점을 더한다).
+                onRemove = { uri -> photos.firstOrNull { it.uri == uri.toString() }?.let { viewModel.removePhoto(it.ref) } },
+                onMove = { from, to -> viewModel.movePhoto(from, to) },
+                columns = 5,
+            )
+        }
     }
 }
 

@@ -344,11 +344,71 @@ class ChatViewModelTest {
         assertFalse(vm.uiState.value.panelOpen)
         vm.send("문단 2를 더 짧게"); advanceUntilIdle()
 
+        // 접어 둔 채로 고쳐 달라고 해도 지금 초안이 함께 실려 나가야 한다.
+        assertEquals("첫 제목", contexts.last().currentPost?.title)
         assertEquals(listOf("둘째 제목"), reinjects.map { it.title })
         assertEquals(jobId, vm.uiState.value.panelJobId)
         assertEquals(1, pendingJobs.jobs.value.size)
         assertEquals("둘째 제목", pendingJobs.jobs.value.single().content.title)
         collector.cancel()
+    }
+
+    /** 못 읽은 사진 자리를 비워 두면 다음 첨부에서 번호가 겹친다 — 붙일 때마다 전체를 다시 매긴다. */
+    @Test
+    fun refsStayContiguousWhenAnUnreadablePhotoIsDropped() = runTest {
+        photos = FakePhotoAttachments(unreadable = setOf("b"))
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+
+        vm.attachPhotos(listOf("a", "b", "c")); advanceUntilIdle()
+        assertEquals(listOf("img_001" to "a", "img_002" to "c"), vm.uiState.value.attachments.map { it.ref to it.uri })
+
+        vm.attachPhotos(listOf("d")); advanceUntilIdle()
+        val refs = vm.uiState.value.attachments.map { it.ref }
+        assertEquals(listOf("img_001", "img_002", "img_003"), refs)
+        assertEquals(refs.size, refs.distinct().size)
+
+        // 대화에 남는 사진 메시지의 ref 도 최종 번호와 같아야 한다.
+        val messaged = chatRepo.messages.value.filter { it.kind == MessageKind.PHOTOS }
+            .mapNotNull { ChatPayloads.readPhotos(it.payloadJson) }
+        assertEquals(listOf(listOf("img_001", "img_002"), listOf("img_003")), messaged.map { it.refs })
+    }
+
+    @Test
+    fun attachingTheSameUriTwiceIsIgnored() = runTest {
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.attachPhotos(listOf("a", "a", "b")); advanceUntilIdle()
+        vm.attachPhotos(listOf("b", "c")); advanceUntilIdle()
+
+        assertEquals(listOf("a", "b", "c"), vm.uiState.value.attachments.map { it.uri })
+        assertEquals(listOf("img_001", "img_002", "img_003"), vm.uiState.value.attachments.map { it.ref })
+    }
+
+    /** 사진판의 앞/뒤 버튼은 사진판 기준 위치를 준다 — 이미 보낸 사진 개수만큼 밀려 있으면 안 된다. */
+    @Test
+    fun movePhotoUsesTrayPositionsAfterEarlierPhotosWereSent() = runTest {
+        turns += TurnResult.Success(TurnResponse("네"), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.attachPhotos(listOf("a", "b")); advanceUntilIdle()
+        vm.send("먼저 이거요"); advanceUntilIdle()
+        vm.attachPhotos(listOf("c", "d")); advanceUntilIdle()
+
+        assertEquals(2, vm.uiState.value.trayFrom)
+        assertEquals(listOf("c", "d"), vm.uiState.value.tray.map { it.uri })
+
+        vm.movePhoto(1, 0)   // 사진판에서 d 를 앞으로
+        assertEquals(listOf("a", "b", "d", "c"), vm.uiState.value.attachments.map { it.uri })
+        assertEquals(listOf("img_001", "img_002", "img_003", "img_004"), vm.uiState.value.attachments.map { it.ref })
+    }
+
+    /** 열쇠가 없어 턴이 아예 시작되지 않았으면 고른 사진이 사진판에서 사라지면 안 된다. */
+    @Test
+    fun withoutUsableKeyThePhotoTrayIsKept() = runTest {
+        val vm = newViewModel(hasKey = false); vm.open(null); advanceUntilIdle()
+        vm.attachPhotos(listOf("a", "b")); advanceUntilIdle()
+        vm.send("안녕"); advanceUntilIdle()
+
+        assertEquals(0, vm.uiState.value.trayFrom)
+        assertEquals(listOf("a", "b"), vm.uiState.value.tray.map { it.uri })
     }
 
     @Test

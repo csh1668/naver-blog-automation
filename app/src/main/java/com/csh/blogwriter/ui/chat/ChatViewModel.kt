@@ -126,18 +126,25 @@ class ChatViewModel @Inject constructor(
     fun attachPhotos(uris: List<String>) {
         if (uris.isEmpty()) return
         val session = _uiState.value.session ?: return
+        // 같은 사진을 두 번 고르면 ref 도 사진판 키도 겹친다 — 이미 붙인 것은 건너뛴다.
+        val already = _uiState.value.attachments.map { it.uri }.toSet()
+        val fresh = uris.distinct().filterNot { it in already }
+        if (fresh.isEmpty()) return
         viewModelScope.launch {
-            val prepared = photoAttachments.prepare(session.id, _uiState.value.attachments.size, uris)
+            val prepared = photoAttachments.prepare(session.id, _uiState.value.attachments.size, fresh)
             // 읽지 못한 사진을 들고 있으면 나중에 발행 단계에서 통째로 실패한다 — 여기서 뺀다.
             val (usable, unreadable) = prepared.partition { it.thumb != null }
+            // 빠진 자리를 남기지 않으려면 목록 전체를 다시 매겨야 한다 (안 그러면 다음 첨부에서 ref 가 겹친다).
             _uiState.update {
                 it.copy(
-                    attachments = it.attachments + usable,
+                    attachments = renumber(it.attachments + usable),
                     error = if (unreadable.isNotEmpty()) "사진 ${unreadable.size}장은 읽지 못했어요. 다시 골라 주세요." else null,
                 )
             }
             if (usable.isNotEmpty()) {
-                chatRepo.appendMessage(session.id, MessageRole.USER, MessageKind.PHOTOS, ChatPayloads.photos(usable))
+                // 메시지에 남기는 ref 는 다시 매긴 뒤의 번호여야 한다.
+                val added = _uiState.value.attachments.takeLast(usable.size)
+                chatRepo.appendMessage(session.id, MessageRole.USER, MessageKind.PHOTOS, ChatPayloads.photos(added))
             }
         }
     }
@@ -154,12 +161,18 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /** 사진판의 앞/뒤 버튼. 순서가 곧 글에 들어갈 순서라 ref 도 함께 다시 매긴다. */
+    /**
+     * 사진판의 앞/뒤 버튼. 위치는 **사진판 기준**(= 아직 안 보낸 사진들 안에서의 자리)이다.
+     * 순서가 곧 글에 들어갈 순서라 ref 도 함께 다시 매긴다.
+     */
     fun movePhoto(from: Int, to: Int) {
         _uiState.update { state ->
-            if (from !in state.attachments.indices || to !in state.attachments.indices) return@update state
+            val offset = state.trayFrom.coerceIn(0, state.attachments.size)
+            val source = offset + from
+            val target = offset + to
+            if (source !in state.attachments.indices || target !in state.attachments.indices) return@update state
             val list = state.attachments.toMutableList()
-            list.add(to, list.removeAt(from))
+            list.add(target, list.removeAt(source))
             state.copy(attachments = renumber(list))
         }
     }
@@ -196,13 +209,7 @@ class ChatViewModel @Inject constructor(
         if (_uiState.value.thinking) return
         lastDraftTurn = draftTurn
         // 연타로 두 턴이 겹치지 않게 코루틴을 띄우기 전에 잠근다.
-        _uiState.update {
-            it.copy(
-                thinking = true, streamingSay = null, toolStatus = null, quickReplies = emptyList(), error = null,
-                // 붙인 사진은 이 턴에 함께 나가므로 사진판을 비운다 (대화의 사진 목록에는 그대로 남는다).
-                trayFrom = it.attachments.size,
-            )
-        }
+        _uiState.update { it.copy(thinking = true, streamingSay = null, toolStatus = null, quickReplies = emptyList(), error = null) }
         val sessionId = session.id
         turnJob = viewModelScope.launch {
             try {
@@ -210,6 +217,8 @@ class ChatViewModel @Inject constructor(
                     system(sessionId, NO_KEY)
                     return@launch
                 }
+                // 턴이 실제로 시작될 때만 사진판을 비운다 (대화의 사진 목록에는 그대로 남는다).
+                _uiState.update { it.copy(trayFrom = it.attachments.size) }
                 if (userText != null) {
                     chatRepo.appendMessage(sessionId, MessageRole.USER, MessageKind.TEXT, ChatPayloads.text(userText))
                 }
@@ -257,7 +266,8 @@ class ChatViewModel @Inject constructor(
             attachments = photoAttachments.attachments(session.id, _uiState.value.attachments),
             style = style,
             draftTurn = draftTurn,
-            currentPost = if (_uiState.value.panelOpen) lastPost(history) else null,
+            // 재주입 조건과 같아야 한다 — 패널을 접어 두고 "문단 2를 더 짧게" 라고 해도 지금 초안을 함께 보낸다.
+            currentPost = if (_uiState.value.panelJobId != null) lastPost(history) else null,
         )
     }
 
