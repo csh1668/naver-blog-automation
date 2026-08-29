@@ -2,6 +2,7 @@ package com.csh.blogwriter.publish
 
 import com.csh.blogwriter.domain.model.Align
 import com.csh.blogwriter.domain.model.Block
+import com.csh.blogwriter.domain.model.GroupLayout
 import com.csh.blogwriter.domain.model.ListType
 import com.csh.blogwriter.domain.model.PostContent
 import com.csh.blogwriter.domain.model.Run
@@ -35,9 +36,12 @@ class DocumentModelConverter(private val idGenerator: () -> String = { "SE-" + U
                         representAssigned = true
                     }
                     is Block.Quote -> { flush(); add(quoteComponent(block)) }
-                    // TODO 스마트에디터 표(table) 컴포넌트 형식을 확인하면 진짜 표로 바꾼다. 그때까지는 "항목 : 값" 문단으로.
-                    is Block.Table -> block.rows.filter { it.isNotEmpty() }.forEach { row ->
-                        pendingParagraphs += Block.Paragraph(listOf(Run(row.joinToString(" : "))))
+                    is Block.Table -> { flush(); add(tableComponent(block)) }
+                    is Block.ImageGroup -> {
+                        flush()
+                        val uploaded = block.refs.map { ref -> requireNotNull(images[ref]) { "업로드 결과 없음: $ref" } }
+                        add(imageGroupComponent(uploaded, block.layout, represent = !representAssigned))
+                        representAssigned = true
                     }
                 }
             }
@@ -103,8 +107,60 @@ class DocumentModelConverter(private val idGenerator: () -> String = { "SE-" + U
         put("@ctype", "quotation")
     }
 
-    private fun imageComponent(img: UploadedImage, represent: Boolean): JsonObject {
-        val width = min(693, img.width)
+    /**
+     * 표(spike 덤프 2026-08-29): table{width:100, rows:[tableRow{cells:[tableCell{colSpan,rowSpan,width%,height,backgroundColor?,value:[paragraph]}]}], columnCount, borderStyleName}.
+     * 2열 정보 표는 왼쪽 항목 열을 좁게(30%) 두고 연한 주황 배경을 준다.
+     */
+    private fun tableComponent(t: Block.Table): JsonObject {
+        val rows = t.rows.filter { it.isNotEmpty() }
+        val columnCount = rows.maxOf { it.size }.coerceAtLeast(1)
+        val widths = if (columnCount == 2) listOf(30.0, 70.0) else List(columnCount) { (100.0 / columnCount * 100).roundToInt() / 100.0 }
+        return buildJsonObject {
+            put("id", idGenerator()); put("layout", "default"); put("width", 100)
+            put("rows", buildJsonArray {
+                rows.forEach { row ->
+                    add(buildJsonObject {
+                        put("cells", buildJsonArray {
+                            for (col in 0 until columnCount) {
+                                add(buildJsonObject {
+                                    put("id", idGenerator()); put("colSpan", 1); put("rowSpan", 1)
+                                    put("width", widths[col]); put("height", 43)
+                                    if (col == 0) put("backgroundColor", LABEL_CELL_BACKGROUND)
+                                    put("value", buildJsonArray { add(plainParagraph(row.getOrNull(col).orEmpty())) })
+                                    put("@ctype", "tableCell")
+                                })
+                            }
+                        })
+                        put("@ctype", "tableRow")
+                    })
+                }
+            })
+            put("columnCount", columnCount); put("borderStyleName", "thinLine"); put("@ctype", "table")
+        }
+    }
+
+    /**
+     * 사진 그룹(spike 덤프 2026-08-29): imageGroup{layout:"collage"|"slide", contentMode:"extend", caption:null, images:[image…]}.
+     * collage 는 두 장씩 50%, 홀수 마지막은 100%; slide 는 widthPercentage 0.
+     */
+    private fun imageGroupComponent(images: List<UploadedImage>, layout: GroupLayout, represent: Boolean): JsonObject = buildJsonObject {
+        put("id", idGenerator()); put("layout", if (layout == GroupLayout.SLIDE) "slide" else "collage")
+        put("contentMode", "extend"); put("caption", null as String?)
+        put("images", buildJsonArray {
+            images.forEachIndexed { i, img ->
+                val percent = when {
+                    layout == GroupLayout.SLIDE -> 0
+                    i == images.lastIndex && images.size % 2 == 1 -> 100
+                    else -> 50
+                }
+                add(imageComponent(img, represent = represent && i == 0, widthPercentage = percent, maxWidth = if (layout == GroupLayout.SLIDE) 693 else 936))
+            }
+        })
+        put("@ctype", "imageGroup")
+    }
+
+    private fun imageComponent(img: UploadedImage, represent: Boolean, widthPercentage: Int = 0, maxWidth: Int = 693): JsonObject {
+        val width = min(maxWidth, img.width)
         val height = (img.height.toDouble() * width / img.width).roundToInt()
         return buildJsonObject {
             put("id", idGenerator()); put("layout", "default")
@@ -112,7 +168,7 @@ class DocumentModelConverter(private val idGenerator: () -> String = { "SE-" + U
             put("internalResource", true); put("represent", represent)
             put("path", img.url); put("domain", img.domain)
             put("fileSize", img.fileSize)
-            put("width", width); put("widthPercentage", 0); put("height", height)
+            put("width", width); put("widthPercentage", widthPercentage); put("height", height)
             put("originalWidth", img.width); put("originalHeight", img.height)
             put("fileName", img.fileName)
             put("format", "normal"); put("displayFormat", "normal"); put("imageLoaded", true); put("contentMode", "fit")
@@ -122,7 +178,10 @@ class DocumentModelConverter(private val idGenerator: () -> String = { "SE-" + U
     }
 
     companion object {
-        /** 제목 1 + (연속 문단은 하나의 text 컴포넌트) + 이미지/인용구 각 1. 주입 후 검증에 사용. */
+        /** 정보 표의 항목 열 배경(연한 주황). */
+        const val LABEL_CELL_BACKGROUND = "#fde7d3"
+
+        /** 제목 1 + (연속 문단은 하나의 text 컴포넌트) + 이미지/그룹/인용구/표 각 1. 주입 후 검증에 사용. */
         fun expectedComponentCount(content: PostContent): Int {
             var count = 1
             var inText = false

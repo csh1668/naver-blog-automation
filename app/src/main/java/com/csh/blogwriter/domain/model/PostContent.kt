@@ -6,7 +6,14 @@ import kotlinx.serialization.json.Json
 
 @Serializable
 data class PostContent(val title: String, val blocks: List<Block>) {
-    fun imageRefs(): List<String> = blocks.filterIsInstance<Block.Image>().map { it.ref }
+    /** 단독 사진과 사진 그룹의 ref 를 글 순서대로. 업로드 개수·누락 검사가 이 목록을 쓴다. */
+    fun imageRefs(): List<String> = blocks.flatMap { b ->
+        when (b) {
+            is Block.Image -> listOf(b.ref)
+            is Block.ImageGroup -> b.refs
+            else -> emptyList()
+        }
+    }
 }
 
 @Serializable
@@ -23,7 +30,13 @@ sealed interface Block {
     /** 2열 정보 표(가게 정보 등). rows = [["주소", "…"], ["전화", "…"]]. 첫 열은 항목명. */
     @Serializable @SerialName("table")
     data class Table(val rows: List<List<String>>) : Block
+
+    /** 같은 대상 여러 컷을 한 컴포넌트로 묶는다. collage = 바둑판, slide = 넘겨 보기. */
+    @Serializable @SerialName("imageGroup")
+    data class ImageGroup(val refs: List<String>, val layout: GroupLayout = GroupLayout.COLLAGE) : Block
 }
+
+@Serializable enum class GroupLayout { COLLAGE, SLIDE }
 
 @Serializable
 data class Run(

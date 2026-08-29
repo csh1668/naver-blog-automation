@@ -136,4 +136,36 @@ class DocumentModelConverterTest {
         val parsed = UploadedImage.fromResponse("img_001", response)
         assertEquals(UploadedImage("img_001", "/a/b.PNG/x.jpg", "x.jpg", 800, 600, 21096, "https://blogfiles.pstatic.net"), parsed)
     }
+
+    @Test
+    fun tableBecomesTableComponent() {
+        val doc = convert(PostContent("t", listOf(Block.Table(listOf(listOf("주소", "원주시 1"), listOf("전화", "033"))))), emptyMap())
+        val table = components(doc)[1].jsonObject
+        assertEquals("table", table["@ctype"]!!.jsonPrimitive.content)
+        assertEquals(2, table["columnCount"]!!.jsonPrimitive.int)
+        val rows = table["rows"]!!.jsonArray
+        assertEquals(2, rows.size)
+        val firstCell = rows[0].jsonObject["cells"]!!.jsonArray[0].jsonObject
+        assertEquals(DocumentModelConverter.LABEL_CELL_BACKGROUND, firstCell["backgroundColor"]!!.jsonPrimitive.content)
+        assertEquals("주소", firstCell["value"]!!.jsonArray[0].jsonObject["nodes"]!!.jsonArray[0].jsonObject["value"]!!.jsonPrimitive.content)
+        assertNull(rows[0].jsonObject["cells"]!!.jsonArray[1].jsonObject["backgroundColor"])
+    }
+
+    @Test
+    fun imageGroupBecomesCollageWithHalfWidths() {
+        val img2 = image.copy(ref = "img_002", url = "/x/img_002.jpg", fileName = "img_002.jpg")
+        val img3 = image.copy(ref = "img_003", url = "/x/img_003.jpg", fileName = "img_003.jpg")
+        val doc = convert(
+            PostContent("t", listOf(Block.ImageGroup(listOf("img_001", "img_002", "img_003")))),
+            mapOf("img_001" to image, "img_002" to img2, "img_003" to img3),
+        )
+        val group = components(doc)[1].jsonObject
+        assertEquals("imageGroup", group["@ctype"]!!.jsonPrimitive.content)
+        assertEquals("collage", group["layout"]!!.jsonPrimitive.content)
+        val images = group["images"]!!.jsonArray.map { it.jsonObject }
+        assertEquals(listOf(50, 50, 100), images.map { it["widthPercentage"]!!.jsonPrimitive.int })
+        assertTrue(images[0]["represent"]!!.jsonPrimitive.boolean)
+        assertFalse(images[1]["represent"]!!.jsonPrimitive.boolean)
+        assertEquals(2, DocumentModelConverter.expectedComponentCount(PostContent("t", listOf(Block.ImageGroup(listOf("img_001", "img_002"))))))
+    }
 }

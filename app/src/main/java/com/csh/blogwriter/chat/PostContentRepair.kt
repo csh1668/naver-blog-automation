@@ -13,11 +13,20 @@ object PostContentRepair {
     fun repair(post: PostContent, attachedRefs: List<String>): Repaired {
         val fixes = mutableListOf<String>()
         val seen = mutableSetOf<String>()
-        val blocks = post.blocks.filter { b ->
-            if (b !is Block.Image) true
-            else if (b.ref !in attachedRefs) { fixes += "없는 사진 제거: ${b.ref}"; false }
-            else if (!seen.add(b.ref)) { fixes += DUPLICATE + b.ref; false }
+        fun keep(ref: String): Boolean =
+            if (ref !in attachedRefs) { fixes += "없는 사진 제거: $ref"; false }
+            else if (!seen.add(ref)) { fixes += DUPLICATE + ref; false }
             else true
+        val blocks = post.blocks.mapNotNull { b ->
+            when (b) {
+                is Block.Image -> if (keep(b.ref)) b else null
+                // 그룹 안의 사진도 같은 규칙으로 거르고, 한 장만 남으면 단독 사진으로, 비면 없앤다.
+                is Block.ImageGroup -> when (val refs = b.refs.filter { keep(it) }) {
+                    emptyList<String>() -> null
+                    else -> if (refs.size == 1) Block.Image(refs[0]) else b.copy(refs = refs)
+                }
+                else -> b
+            }
         }.toMutableList()
         attachedRefs.filterNot { it in seen }.forEach { fixes += MISSING + it; blocks += Block.Image(it) }
         var title = post.title.trim()

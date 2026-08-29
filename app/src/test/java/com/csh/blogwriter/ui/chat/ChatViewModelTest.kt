@@ -154,6 +154,8 @@ class ChatViewModelTest {
 
         val storedBlogId = MutableStateFlow<String?>(null)
         override val blogId: Flow<String?> = storedBlogId
+        // 게이트 테스트의 글 길이(1000/1100/1300/1500자)는 이 범위를 기준으로 짜여 있다 — 앱 기본값이 바뀌어도 테스트는 고정.
+        override val modelPolicy: Flow<com.csh.blogwriter.llm.ModelPolicy> = flowOf(com.csh.blogwriter.llm.ModelPolicy.DEFAULT.copy(targetLength = 1200..1800))
         override suspend fun setBlogId(id: String?) { storedBlogId.value = id }
 
         override val lastUpdateCheckAt: Flow<Long> = lastCheckAt

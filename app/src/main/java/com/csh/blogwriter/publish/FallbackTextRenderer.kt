@@ -27,6 +27,7 @@ object FallbackTextRenderer {
                 is Block.Image -> { flushList(); chunks += "[사진 ${++imageNo}]" }
                 is Block.Quote -> { flushList(); chunks += "\"${block.text}\"" + (block.source?.let { " — $it" } ?: "") }
                 is Block.Table -> { flushList(); chunks += block.rows.joinToString("\n") { it.joinToString(" : ") } }
+                is Block.ImageGroup -> { flushList(); chunks += "[사진 ${block.refs.size}장]"; imageNo += block.refs.size }
             }
         }
         flushList()

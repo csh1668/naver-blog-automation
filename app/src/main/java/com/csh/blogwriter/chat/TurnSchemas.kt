@@ -41,6 +41,11 @@ object TurnSchemas {
                 put("type", buildJsonObject { put("type", "string"); putJsonArray("enum") { add("table") } })
                 put("rows", buildJsonObject { put("type", "array"); put("description", "2열 표. 각 행은 [항목명, 값]"); put("items", arrayOf(str())) })
             }; putJsonArray("required") { add("type"); add("rows") } })
+            add(buildJsonObject { put("type", "object"); putJsonObject("properties") {
+                put("type", buildJsonObject { put("type", "string"); putJsonArray("enum") { add("imageGroup") } })
+                put("refs", buildJsonObject { put("type", "array"); put("description", "묶을 사진 ref 2~4개(각 사진은 글 전체에서 한 번만)"); put("items", str()) })
+                put("layout", buildJsonObject { put("type", "string"); putJsonArray("enum") { add("COLLAGE"); add("SLIDE") } })
+            }; putJsonArray("required") { add("type"); add("refs") } })
         }
     }
     val postContent: JsonObject = buildJsonObject {
