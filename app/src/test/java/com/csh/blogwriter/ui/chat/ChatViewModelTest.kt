@@ -201,11 +201,14 @@ class ChatViewModelTest {
     private var gate: CompletableDeferred<Unit>? = null
     /** 턴이 도는 동안 엔진이 리스너를 부르는 상황을 흉내 낸다(도구 호출 등). */
     private var onTurn: ((TurnListener) -> Unit)? = null
+    /** 마지막 턴이 받은 리스너 — 늦게 도착한 도구 결과를 흉내 낼 때 직접 부른다. */
+    private var lastListener: TurnListener? = null
     private var viewModel: ChatViewModel? = null
 
     private val runner = object : TurnRunner {
         override suspend fun runTurn(ctx: ChatContext, listener: TurnListener): TurnResult {
             contexts += ctx
+            lastListener = listener
             partials.forEach { partial ->
                 listener.onPartialSay(partial)
                 observedStreaming += viewModel?.uiState?.value?.streamingSay
@@ -1227,6 +1230,33 @@ class ChatViewModelTest {
         assertEquals(SessionMode.ADVICE, vm.uiState.value.mode)
         assertEquals("원주 카페 늘봄", vm.uiState.value.focusedPost?.title)
         assertTrue(vm.uiState.value.panelOpen)
+    }
+
+    /** 늦게 온 도구 결과는 그 턴의 대화에만 붙는다 — 그 사이 다른 대화로 옮겨 갔으면 조용히 버린다. */
+    @Test
+    fun aLatePostReadNeverLandsInAnotherSession() = runTest {
+        turns += say("읽었어요"); turns += say("다른 이야기네요")
+        partials = emptyList()
+        val vm = newViewModel()
+        vm.openInitial(null); advanceUntilIdle()
+        vm.setMode(SessionMode.ADVICE)
+        vm.send("늘봄 글 봐 줘"); advanceUntilIdle()
+        val first = vm.uiState.value.session!!.id
+        val firstTurnListener = lastListener!!
+
+        // 사용자가 다른 조언 대화로 옮겨 간다.
+        vm.open(null); advanceUntilIdle()
+        vm.setMode(SessionMode.ADVICE)
+        vm.send("이건 다른 이야기"); advanceUntilIdle()
+        val second = vm.uiState.value.session!!.id
+        assertNotEquals(first, second)
+
+        // 첫 대화의 턴이 이제서야 글을 읽었다고 알려 온다.
+        firstTurnListener.onPostRead("100000000001", "원주 카페 늘봄"); advanceUntilIdle()
+
+        assertNull(vm.uiState.value.focusedPost)
+        assertTrue(chatRepo.of(first).none { it.kind == MessageKind.POST_VIEW })
+        assertTrue(chatRepo.of(second).none { it.kind == MessageKind.POST_VIEW })
     }
 
     @Test

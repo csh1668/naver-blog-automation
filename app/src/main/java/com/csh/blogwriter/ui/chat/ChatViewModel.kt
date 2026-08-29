@@ -502,7 +502,7 @@ class ChatViewModel @Inject constructor(
                     chatRepo.appendMessage(sessionId, MessageRole.USER, MessageKind.TEXT, ChatPayloads.text(userText))
                 }
                 val result = try {
-                    runner.runTurn(context(session, draftTurn), listener)
+                    runner.runTurn(context(session, draftTurn), listenerFor(sessionId))
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -539,13 +539,14 @@ class ChatViewModel @Inject constructor(
     /** 지금 화면에 떠 있는 대화가 [sessionId] 인가. 늦게 온 결과를 버릴 때 쓴다. */
     private fun isCurrent(sessionId: String) = _uiState.value.session?.id == sessionId
 
-    private val listener = object : TurnListener {
+    /** 턴 하나가 쓰는 리스너. 자기 대화 [sessionId] 를 들고 있어야 늦게 온 신호가 남의 대화에 붙지 않는다. */
+    private fun listenerFor(sessionId: String) = object : TurnListener {
         override fun onToolStatus(text: String) = _uiState.update { it.copy(toolStatus = text) }
         // 값은 늘 "지금까지의 전체 접두" 다 — 이어붙이지 않고 교체한다. 빈 문자열은 지우라는 뜻.
         override fun onPartialSay(text: String) = _uiState.update { it.copy(streamingSay = text.ifEmpty { null }) }
         // 조언 도구가 글을 읽으면 오른쪽을 그 글로 연다. 대화에도 남겨 다시 열 때 되살린다.
         override fun onPostRead(logNo: String, title: String) {
-            val sessionId = _uiState.value.session?.id ?: return
+            if (!isCurrent(sessionId)) return
             val view = PostView(logNo, title)
             _uiState.update { it.copy(focusedPost = view, panelOpen = true, listCollapsed = true) }
             viewModelScope.launch { if (isCurrent(sessionId)) chatRepo.appendMessage(sessionId, MessageRole.SYSTEM, MessageKind.POST_VIEW, ChatPayloads.postView(view)) }
