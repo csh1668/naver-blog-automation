@@ -35,9 +35,9 @@ interface BlogReader {
 }
 ```
 
-- `listPosts`: OkHttp GET `https://m.blog.naver.com/api/blogs/{blogId}/post-list?categoryNo=0&itemCount={count}&page=1`, 헤더 `Referer: https://m.blog.naver.com/{blogId}`, `CookieManager`의 네이버 쿠키 동봉(이웃공개 글 포함). 응답 필드명은 스파이크로 확정한다(§9).
-- `readPost`: 기존 `research/HiddenWebView`로 `https://m.blog.naver.com/PostView.naver?blogId={blogId}&logNo={logNo}` 로드 → `assets/blog_post_extract.js`가 `div.se-main-container`에서 문단 텍스트(빈 줄 제거), 사진 수, 제목, 날짜를 JSON으로 돌려준다. 문단 합계 6,000자 상한(넘으면 자르고 `(이하 생략)`).
-- 두 함수 모두 예외를 삼키고 `null`을 돌려주며 `Log.w("BlogReader", …)`만 남긴다.
+- `listPosts`: OkHttp GET `https://m.blog.naver.com/api/blogs/{blogId}/post-list?categoryNo=0&itemCount={count}&page=1`, 헤더 `Referer: https://m.blog.naver.com/{blogId}`(없으면 403), `CookieManager`의 네이버 쿠키 동봉(이웃공개 글 포함). 파싱: `result.items[]`의 `logNo`(정수), `titleWithInspectMessage`, `addDate`(epoch ms), `commentCnt`, `sympathyCnt`; `briefContents`(약 500자 요약)와 `thumbnailCount`도 함께 담아 목록 표에 쓴다. `isSuccess=false`면 null.
+- `readPost`: 모바일 `PostView.naver`는 **서버 렌더링**이라(스파이크 §9) WebView 없이 OkHttp GET + **Jsoup**(새 의존성 `org.jsoup:jsoup`)으로 파싱한다. 선택자: 제목 `.se-title-text`, 본문 `div.se-main-container > div.se-component` 순서대로 — `se-text`/`se-quotation`은 `.se-text-paragraph` 텍스트(빈 문단 제거, 인용은 `> ` 접두), `se-table`은 행을 `항목: 값` 줄로, `se-image`/`se-imageGroup`/`se-imageStrip`은 `img` 수만 세어 `[사진 N장]` 줄로, `se-video`는 `[동영상]`, 그 밖(`se-placesMap`, `se-horizontalLine` 등)은 무시. 날짜는 페이지가 상대 시각("3시간 전")이라 쓰지 않고 목록의 `addDate`를 쓴다. 문단 합계 6,000자 상한(넘으면 자르고 `(이하 생략)`).
+- 두 함수 모두 예외를 삼키고 `null`을 돌려주며 `Log.w("BlogReader", …)`만 남긴다. 히든 WebView는 쓰지 않는다(검색 도구와 자원 경합 없음).
 - 모바일 URL 헬퍼 `postUrl(blogId, logNo)` — 오른쪽 패널과 공유.
 
 ## 5. 프롬프트·스키마
@@ -90,12 +90,13 @@ interface BlogReader {
 - `MigrationTest` 2→3.
 - 화면(`ChatScreen`, `PromptsScreen`)은 컴파일만.
 
-## 9. 선행 스파이크 (코드 전)
+## 9. 스파이크 결과 (2026-08-29, 실제 공개 블로그로 확인)
 
-실제 계정으로 아래를 확인하고 응답을 **가명화한 픽스처**로 `app/src/test/resources/blog/`에 저장한다. 블로그 id·글 제목·본문·logNo는 커밋 전에 반드시 치환한다.
-1. `post-list` JSON의 필드명(logNo, 제목, 날짜, 댓글 수, 공감 수)과 Referer 없이 호출했을 때의 응답.
-2. `PostView.naver` 모바일 DOM: `div.se-main-container` 안의 문단·사진·제목·날짜 선택자, 로그인 없이 공개 글이 열리는지.
-3. 30개 목록 + 본문 1편 읽기의 소요 시간(히든 WebView 기준).
+픽스처(전부 가상 값·가상 문장)는 `app/src/test/resources/blog/`: `post-list.json`(실제 키 구조 그대로, 3건), `post-list-error.json`(Referer 없을 때의 403 본문), `post-view.html`(모바일 PostView의 클래스 구조를 축소 재현).
+
+1. **post-list**: Referer 없이 호출 → 403 `{"isSuccess":false,"error":{…}}`. Referer 있으면 200, 30건 172 KB, 0.3 s. `result.{page,categoryNo,categoryName,totalCount,items[]}`. 항목 키: `logNo`(int), `titleWithInspectMessage`, `commentCnt`, `sympathyCnt`, `briefContents`(≈500자), `addDate`(epoch ms), `categoryName`, `thumbnailCount`, `readCount`(null — 조회수는 안 옴), `smartEditorVersion`.
+2. **PostView(모바일)**: 로그인 없이 200, 159 KB, 0.4 s, **서버 렌더링**(`div.se-main-container` 1개, 최상위 `div.se-component` 44개: `se-text`, `se-image`, `se-imageGroup se-l-collage`, `se-imageStrip`, `se-video`, `se-quotation se-l-quotation_line|corner`, `se-table`, `se-placesMap`, `se-horizontalLine`). 문단 `p.se-text-paragraph > span`, 인용 `.se-quote`, 이미지 `img.se-image-resource[data-lazy-src]`, 제목 `.se-title-text`, 날짜 `p.blog_date`는 상대 시각. → 히든 WebView 대신 OkHttp + Jsoup으로 결정(§4).
+3. 소요 시간: 목록 0.3 s + 본문 0.4 s(curl 기준). 히든 WebView였다면 이미지 로딩까지 수 초.
 
 ## 10. 범위 밖 (다음 SP)
 
