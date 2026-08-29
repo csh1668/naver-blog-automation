@@ -168,6 +168,8 @@ private fun SessionRow(
                     style = AppTheme.typography.body1,
                     color = if (selected) c.fillBrand else c.textPrimary,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    // 칩이 차지하고 남은 폭 안에서만 재어 긴 제목이 칩을 밀어내지 않게 한다.
+                    modifier = Modifier.weight(1f),
                 )
             }
             Text(
