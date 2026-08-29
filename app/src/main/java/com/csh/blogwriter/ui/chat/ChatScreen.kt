@@ -86,6 +86,7 @@ import com.csh.blogwriter.ui.chat.components.Composer
 import com.csh.blogwriter.ui.chat.components.MessageBubble
 import com.csh.blogwriter.ui.chat.components.PhotosBubble
 import com.csh.blogwriter.ui.chat.components.PlanPanel
+import com.csh.blogwriter.ui.chat.components.PublishedPostPanel
 import com.csh.blogwriter.ui.chat.components.QuickReplyChips
 import com.csh.blogwriter.ui.chat.components.SessionListPane
 import com.csh.blogwriter.ui.chat.components.SessionListWidth
@@ -135,7 +136,9 @@ fun ChatScreen(
     }
     // 오른쪽 자리는 초안이 있으면 에디터가, 아직 계획뿐이면 계획이 차지한다.
     val showEditor = panelMounted && ui.panelJobId != null
-    val planMarkdown = if (showEditor) null else ui.plan
+    // 발행이 끝난 대화는 계획 대신 올라간 글을 보여 준다.
+    val publishedUrl = ui.session?.takeIf { it.status == SessionStatus.PUBLISHED }?.publishedUrl
+    val planMarkdown = if (showEditor || publishedUrl != null) null else ui.plan
 
     // 입력창에 커서가 있는 동안에는 채팅 쪽을 넓혀 준다 — 오른쪽 패널이 말할 자리를 덜 뺏도록.
     var composerFocused by remember { mutableStateOf(false) }
@@ -147,7 +150,7 @@ fun ChatScreen(
         val chatNeedsRoom = composerFocused || !ui.listCollapsed
         // 에디터는 최소 PANEL_MIN.
         val targetPanelWidth = maxOf(PANEL_MIN, screenWidth * (if (chatNeedsRoom) 0.5f else 0.7f))
-        val panelMountedNow = showEditor || planMarkdown != null
+        val panelMountedNow = showEditor || planMarkdown != null || publishedUrl != null
         // 안쪽(내용)과 바깥쪽(보이는 폭)을 같은 스펙으로 따로 움직인다 —
         // 접을 때는 바깥만 0 으로 줄어 WebView 는 제 폭 그대로 살아 있는다.
         val panelWidth by animateDpAsState(targetPanelWidth, tween(200), label = "panelContentWidth")
@@ -187,7 +190,8 @@ fun ChatScreen(
                     // 접을 때는 폭만 0 으로 줄인다 — 컴포지션에 남아 있어야 WebView 와 편집 내용이 살아남는다.
                     Box(Modifier.width(shownPanelWidth).fillMaxHeight().clipToBounds().clearFocusOnPress()) {
                         Box(Modifier.requiredWidth(panelWidth).fillMaxHeight()) {
-                            if (planMarkdown != null) PlanPanel(planMarkdown, onSave = viewModel::savePlanEdit)
+                            if (publishedUrl != null) PublishedPostPanel(publishedUrl)
+                            else if (planMarkdown != null) PlanPanel(planMarkdown, onSave = viewModel::savePlanEdit)
                             else PanelHost(ui.panelJobId, viewModel, onSessionExpired, onFailed, editorScalePercent) { panelStatus = it }
                         }
                     }
@@ -237,7 +241,8 @@ fun ChatScreen(
                             Text("채팅으로", style = AppTheme.typography.body1, color = AppTheme.colors.textPrimary)
                         }
                         Box(Modifier.weight(1f)) {
-                            if (planMarkdown != null) PlanPanel(planMarkdown, onSave = viewModel::savePlanEdit)
+                            if (publishedUrl != null) PublishedPostPanel(publishedUrl)
+                            else if (planMarkdown != null) PlanPanel(planMarkdown, onSave = viewModel::savePlanEdit)
                             else PanelHost(ui.panelJobId, viewModel, onSessionExpired, onFailed, 100) { panelStatus = it }
                         }
                     }
