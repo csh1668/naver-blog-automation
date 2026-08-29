@@ -17,6 +17,7 @@ exifinterface = "1.4.2"
 webkit = "1.17.0"
 coreKtx = "1.19.0"
 okhttp = "4.12.0"
+jsoup = "1.18.3"
 junit = "4.13.2"
 robolectric = "4.16.1"
 turbine = "1.2.1"
@@ -50,6 +51,7 @@ androidx-exifinterface = { group = "androidx.exifinterface", name = "exifinterfa
 androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "webkit" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
+jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }

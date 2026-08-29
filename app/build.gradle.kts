@@ -96,6 +96,7 @@ dependencies {
     implementation(libs.androidx.exifinterface)
     implementation(libs.androidx.webkit)
     implementation(libs.okhttp)
+    implementation(libs.jsoup)
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)
 

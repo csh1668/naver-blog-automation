@@ -1,5 +1,7 @@
 package com.csh.blogwriter.di
 
+import com.csh.blogwriter.blog.BlogReader
+import com.csh.blogwriter.blog.NaverBlogReader
 import com.csh.blogwriter.chat.CachedPhotoAttachments
 import com.csh.blogwriter.chat.ConversationEngine
 import com.csh.blogwriter.chat.DefaultToolExecutor
@@ -50,6 +52,9 @@ abstract class LlmModule {
         @Provides @Singleton fun secretCipher(): SecretCipher = AndroidKeystoreCipher()
 
         @Provides @Singleton fun geminiClient(http: OkHttpClient): GeminiClient = GeminiClient(GeminiHttp.configure(http))
+
+        @Provides @Singleton fun blogReader(http: OkHttpClient): BlogReader =
+            NaverBlogReader(http, { url -> android.webkit.CookieManager.getInstance().getCookie(url) })
 
         /** [MemoryExtractor] 가 발행 뒤 추출 작업을 화면 스코프와 별개로 돌리는 데 쓴다. */
         @Provides @Singleton fun appScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
