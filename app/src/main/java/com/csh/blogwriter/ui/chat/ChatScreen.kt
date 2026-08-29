@@ -560,6 +560,17 @@ private fun MessageItem(message: ChatMessage, panelOpen: Boolean, viewModel: Cha
             // 발행 링크처럼 주소가 들어 있으면 배너 전체를 눌러 열 수 있게 한다.
             InlineBanner(text, if (url != null) BannerKind.Success else BannerKind.Info, onClick = url?.let { { uriHandler.openUri(it) } })
         }
+        // 최근 글 목록은 모델 컨텍스트용 — 목록에는 읽었다는 한 줄만.
+        MessageKind.BLOG_POSTS -> SystemMessage {
+            val count = ChatPayloads.readBlogPosts(message.payloadJson)?.size ?: 0
+            Text("최근 글 ${count}개를 읽었어요", style = AppTheme.typography.caption, color = AppTheme.colors.textTertiary,
+                modifier = Modifier.padding(horizontal = AppSpacing.sm, vertical = AppSpacing.xs))
+        }
+        MessageKind.POST_VIEW -> Text(
+            "'${ChatPayloads.readPostView(message.payloadJson)?.title.orEmpty()}' 글을 읽었어요 · 보기",
+            style = AppTheme.typography.body2, color = AppTheme.colors.fillBrand,
+            modifier = Modifier.fillMaxWidth().clickable(onClick = viewModel::openPanel).padding(horizontal = AppSpacing.sm, vertical = AppSpacing.md),
+        )
     }
 }
 

@@ -1,5 +1,6 @@
 package com.csh.blogwriter.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -12,4 +13,5 @@ data class ChatSessionEntity(
     val status: String,
     val pendingJobId: String?,
     val publishedUrl: String?,
+    @ColumnInfo(defaultValue = "WRITE") val mode: String = "WRITE",
 )

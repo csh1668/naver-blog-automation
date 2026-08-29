@@ -1,5 +1,6 @@
 package com.csh.blogwriter.ui.chat
 
+import com.csh.blogwriter.blog.PostSummary
 import com.csh.blogwriter.chat.AttachedPhoto
 import com.csh.blogwriter.data.repo.ChatMessage
 import com.csh.blogwriter.data.repo.ChatSession
@@ -11,9 +12,13 @@ import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.put
 
 data class ChatUiState(
@@ -66,6 +71,9 @@ data class DraftGate(val post: PostContent, val issues: List<String>, val reques
 
 /** 사진 첨부 메시지의 내용. */
 data class PhotosPayload(val count: Int, val refs: List<String>, val uris: List<String>)
+
+/** 오른쪽 패널로 열어 볼 글 하나. */
+data class PostView(val logNo: String, val title: String)
 
 /**
  * 메시지 payloadJson 의 인코딩. 대화 기록을 프롬프트로 옮기는
@@ -134,4 +142,27 @@ object ChatPayloads {
 
     fun post(content: PostContent): String = PostContentJson.encode(content)
     fun readPost(payload: String): PostContent? = runCatching { PostContentJson.decode(payload) }.getOrNull()
+
+    fun blogPosts(posts: List<PostSummary>): String = json.encodeToString(JsonObject.serializer(), buildJsonObject {
+        putJsonArray("posts") {
+            posts.forEach { p -> add(buildJsonObject {
+                put("logNo", p.logNo); put("title", p.title); put("addedAt", p.addedAt); put("comments", p.comments)
+                put("likes", p.likes); put("brief", p.brief); put("photoCount", p.photoCount)
+            }) }
+        }
+    })
+    fun readBlogPosts(payload: String): List<PostSummary>? = runCatching {
+        json.parseToJsonElement(payload).jsonObject["posts"]!!.jsonArray.map { e ->
+            val o = e.jsonObject
+            PostSummary(
+                o["logNo"]!!.jsonPrimitive.content, o["title"]!!.jsonPrimitive.content, o["addedAt"]!!.jsonPrimitive.long,
+                o["comments"]!!.jsonPrimitive.int, o["likes"]!!.jsonPrimitive.int, o["brief"]?.jsonPrimitive?.content.orEmpty(), o["photoCount"]?.jsonPrimitive?.int ?: 0,
+            )
+        }
+    }.getOrNull()
+    fun postView(view: PostView): String = json.encodeToString(JsonObject.serializer(), buildJsonObject { put("logNo", view.logNo); put("title", view.title) })
+    fun readPostView(payload: String): PostView? = runCatching {
+        val o = json.parseToJsonElement(payload).jsonObject
+        PostView(o["logNo"]!!.jsonPrimitive.content, o["title"]!!.jsonPrimitive.content)
+    }.getOrNull()
 }

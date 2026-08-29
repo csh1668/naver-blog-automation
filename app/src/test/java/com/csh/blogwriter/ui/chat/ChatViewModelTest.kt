@@ -20,6 +20,7 @@ import com.csh.blogwriter.data.repo.MessageKind
 import com.csh.blogwriter.data.repo.MessageRole
 import com.csh.blogwriter.data.repo.PendingJob
 import com.csh.blogwriter.data.repo.PendingJobRepository
+import com.csh.blogwriter.data.repo.SessionMode
 import com.csh.blogwriter.data.repo.SessionStatus
 import com.csh.blogwriter.domain.model.Block
 import com.csh.blogwriter.domain.model.PostContent
@@ -65,8 +66,8 @@ class ChatViewModelTest {
         override fun observeMessages(sessionId: String): Flow<List<ChatMessage>> =
             messages.map { list -> list.filter { it.sessionId == sessionId } }
 
-        override suspend fun createSession(): ChatSession {
-            val session = ChatSession("s${sessions.value.size + 1}", null, 0, 0, SessionStatus.DRAFTING, null, null)
+        override suspend fun createSession(mode: SessionMode): ChatSession {
+            val session = ChatSession("s${sessions.value.size + 1}", null, 0, 0, SessionStatus.DRAFTING, null, null, mode)
             sessions.value = sessions.value + session
             return session
         }

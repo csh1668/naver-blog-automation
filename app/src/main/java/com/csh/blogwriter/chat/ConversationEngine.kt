@@ -269,8 +269,8 @@ class ConversationEngine(
                 // 계획은 마크다운 전문 그대로 보여 준다 (payload 는 {"markdown": …} 래퍼일 뿐이다).
                 MessageKind.PLAN -> "[계획]\n" + runCatching { json.parseToJsonElement(m.payloadJson).jsonObject["markdown"]!!.jsonPrimitive.content }.getOrDefault(m.payloadJson)
                 MessageKind.POST -> m.payloadJson
-                // 사진 묶음은 첨부 목록 뒤에 이미 한 줄씩 실려 나갔다 — 히스토리로 또 넣지 않는다.
-                MessageKind.SYSTEM, MessageKind.PHOTO_GROUPS -> return@forEach
+                // 사진 묶음은 첨부 목록 뒤에 이미 한 줄씩 실려 나갔다 — 히스토리로 또 넣지 않는다. 글 목록·글 보기도 화면·복원용일 뿐 히스토리엔 싣지 않는다.
+                MessageKind.SYSTEM, MessageKind.PHOTO_GROUPS, MessageKind.BLOG_POSTS, MessageKind.POST_VIEW -> return@forEach
             }
             out += GContent(role, listOf(GPart(text = text)))
         }

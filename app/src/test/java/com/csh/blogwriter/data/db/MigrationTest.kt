@@ -57,7 +57,7 @@ class MigrationTest {
 
         // 같은 파일을 Room 으로 열면 MIGRATION_1_2 가 실행되고, 스키마 검증까지 통과해야 한다(불일치 시 IllegalStateException).
         val db = Room.databaseBuilder(context, AppDatabase::class.java, DB_NAME)
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .allowMainThreadQueries()
             .build()
 
@@ -67,6 +67,36 @@ class MigrationTest {
         val memoryId = db.memoryDao().insert(MemoryItemEntity(kind = "FACT", text = "마이그레이션 확인", source = "test", createdAt = 1, enabled = true, lastUsedAt = null))
         assertEquals("마이그레이션 확인", db.memoryDao().observeAll().first().first { it.id == memoryId }.text)
 
+        db.close()
+    }
+
+    @Test
+    fun migrate2To3AddsModeColumnWithWriteDefault() = runTest {
+        context.deleteDatabase(DB_NAME)
+        val v2Callback = object : SupportSQLiteOpenHelper.Callback(2) {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `publish_history` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `title` TEXT NOT NULL, `logNo` TEXT NOT NULL, `url` TEXT NOT NULL, `publishedAt` INTEGER NOT NULL, `imageCount` INTEGER NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `failure_log` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `at` INTEGER NOT NULL, `stage` TEXT NOT NULL, `message` TEXT NOT NULL, `detail` TEXT NOT NULL, `appVersion` TEXT NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `pending_job` (`id` TEXT NOT NULL, `contentJson` TEXT NOT NULL, `imageUrisJson` TEXT NOT NULL, `preparedPathsJson` TEXT, `createdAt` INTEGER NOT NULL, `lastFailure` TEXT, PRIMARY KEY(`id`))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `chat_session` (`id` TEXT NOT NULL, `title` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `status` TEXT NOT NULL, `pendingJobId` TEXT, `publishedUrl` TEXT, PRIMARY KEY(`id`))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `chat_message` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `sessionId` TEXT NOT NULL, `seq` INTEGER NOT NULL, `role` TEXT NOT NULL, `kind` TEXT NOT NULL, `payloadJson` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_chat_message_sessionId_seq` ON `chat_message` (`sessionId`, `seq`)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `memory_item` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `kind` TEXT NOT NULL, `text` TEXT NOT NULL, `source` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `enabled` INTEGER NOT NULL, `lastUsedAt` INTEGER)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)")
+                db.execSQL("INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '2dc72c1f1dbc851665d09b01d9de8622')")
+            }
+            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {}
+        }
+        val v2Helper = FrameworkSQLiteOpenHelperFactory().create(SupportSQLiteOpenHelper.Configuration.builder(context).name(DB_NAME).callback(v2Callback).build())
+        v2Helper.writableDatabase.apply {
+            execSQL("INSERT INTO chat_session (id, title, createdAt, updatedAt, status, pendingJobId, publishedUrl) VALUES ('s1', '옛 글', 1, 1, 'DRAFTING', NULL, NULL)")
+            close()
+        }
+        val db = Room.databaseBuilder(context, AppDatabase::class.java, DB_NAME).addMigrations(MIGRATION_1_2, MIGRATION_2_3).allowMainThreadQueries().build()
+        val session = db.chatDao().getSession("s1")!!
+        assertEquals("WRITE", session.mode)
+        db.chatDao().upsertSession(session.copy(id = "s2", mode = "ADVICE"))
+        assertEquals("ADVICE", db.chatDao().getSession("s2")!!.mode)
         db.close()
     }
 }

@@ -9,6 +9,7 @@ import com.csh.blogwriter.data.repo.MemoryKind
 import com.csh.blogwriter.data.repo.MemoryRepository
 import com.csh.blogwriter.data.repo.MessageKind
 import com.csh.blogwriter.data.repo.MessageRole
+import com.csh.blogwriter.data.repo.SessionMode
 import com.csh.blogwriter.llm.ApiKey
 import com.csh.blogwriter.llm.ApiKeyStore
 import com.csh.blogwriter.llm.GeminiClient
@@ -47,7 +48,7 @@ class MemoryExtractorTest {
     private val chatRepo = object : ChatRepository {
         override fun observeSessions(): Flow<List<ChatSession>> = flowOf(emptyList())
         override fun observeMessages(sessionId: String): Flow<List<ChatMessage>> = flowOf(emptyList())
-        override suspend fun createSession() = throw NotImplementedError()
+        override suspend fun createSession(mode: SessionMode) = throw NotImplementedError()
         override suspend fun getSession(id: String): ChatSession? = null
         override suspend fun updateSession(session: ChatSession) {}
         override suspend fun setTitle(id: String, title: String) {}
