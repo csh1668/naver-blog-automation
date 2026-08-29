@@ -27,3 +27,6 @@ keystore.properties
 .superpowers/
 gradle/gradle-daemon-jvm.properties
 
+
+# 키스토어 백업 등 압축 파일은 절대 올리지 않는다
+*.zip
