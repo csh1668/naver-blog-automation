@@ -194,15 +194,20 @@ private fun ModeChip(mode: SessionMode, onModeChange: ((SessionMode) -> Unit)?) 
     val c = AppTheme.colors
     var expanded by remember { mutableStateOf(false) }
     Box {
-        Row(
-            Modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(AppSpacing.radiusControl))
-                .background(if (onModeChange != null) c.fillBrandWeak else Color.Transparent)
-                .then(if (onModeChange != null) Modifier.clickable { expanded = true } else Modifier)
-                .padding(horizontal = AppSpacing.md),
-            verticalAlignment = Alignment.CenterVertically,
+        // 칩은 40dp 로 보이되, 누를 수 있을 때는 탭 영역만 56dp 로 넓힌다 (터치 규칙).
+        Box(
+            Modifier.then(if (onModeChange != null) Modifier.heightIn(min = AppSpacing.touchTarget).clickable { expanded = true } else Modifier),
+            contentAlignment = Alignment.CenterStart,
         ) {
-            Text(mode.label(), style = AppTheme.typography.body2, color = if (onModeChange != null) c.fillBrand else c.textTertiary)
-            if (onModeChange != null) Icon(Icons.Rounded.ArrowDropDown, contentDescription = "모드 고르기", tint = c.fillBrand)
+            Row(
+                Modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(AppSpacing.radiusControl))
+                    .background(if (onModeChange != null) c.fillBrandWeak else Color.Transparent)
+                    .padding(horizontal = AppSpacing.md),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(mode.label(), style = AppTheme.typography.body2, color = if (onModeChange != null) c.fillBrand else c.textTertiary)
+                if (onModeChange != null) Icon(Icons.Rounded.ArrowDropDown, contentDescription = "모드 고르기", tint = c.fillBrand)
+            }
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             SessionMode.entries.forEach { m ->

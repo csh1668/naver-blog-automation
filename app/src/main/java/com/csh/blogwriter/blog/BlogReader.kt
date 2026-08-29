@@ -27,24 +27,28 @@ interface BlogReader {
 /**
  * 모바일 블로그는 목록 API(JSON)와 글 페이지(서버 렌더링 HTML)를 로그인 없이 준다 — 스펙 §9.
  * 실패는 전부 null + Log.w. 본문은 같은 글을 턴마다 다시 받지 않도록 최근 [CACHE_SIZE]편을 기억한다.
+ * 다만 이 클래스는 싱글턴이라 캐시가 세션을 넘어 산다 — 사용자가 글을 고치고 "다시 봐 줘" 할 수 있으니
+ * [CACHE_TTL_MS] 가 지난 것은 없는 셈 친다.
  */
 class NaverBlogReader(
     private val http: OkHttpClient,
     private val cookies: CookieSource,
     private val baseUrl: String = "https://m.blog.naver.com",
+    /** 캐시 나이를 재는 시계. 테스트에서 시간을 앞으로 돌리려고 뺀다. */
+    private val now: () -> Long = System::currentTimeMillis,
 ) : BlogReader {
-    private val cache = object : LinkedHashMap<String, PostText>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, PostText>?) = size > CACHE_SIZE
+    private val cache = object : LinkedHashMap<String, Pair<PostText, Long>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<PostText, Long>>?) = size > CACHE_SIZE
     }
 
     override suspend fun listPosts(blogId: String, count: Int): List<PostSummary>? =
-        get("$baseUrl/api/blogs/$blogId/post-list?categoryNo=0&itemCount=$count&page=1", "https://m.blog.naver.com/$blogId")?.let(::parsePostList)
+        get("$baseUrl/api/blogs/$blogId/post-list?categoryNo=0&itemCount=$count&page=1", "$baseUrl/$blogId")?.let(::parsePostList)
 
     override suspend fun readPost(blogId: String, logNo: String): PostText? {
         val key = "$blogId/$logNo"
-        synchronized(cache) { cache[key] }?.let { return it }
-        val html = get("$baseUrl/PostView.naver?blogId=$blogId&logNo=$logNo", "https://m.blog.naver.com/$blogId") ?: return null
-        return parsePostView(html, logNo)?.also { synchronized(cache) { cache[key] = it } }
+        synchronized(cache) { cache[key] }?.takeIf { now() - it.second < CACHE_TTL_MS }?.let { return it.first }
+        val html = get("$baseUrl/PostView.naver?blogId=$blogId&logNo=$logNo", "$baseUrl/$blogId") ?: return null
+        return parsePostView(html, logNo)?.also { synchronized(cache) { cache[key] = it to now() } }
     }
 
     private suspend fun get(url: String, referer: String): String? = withContext(Dispatchers.IO) {
@@ -61,6 +65,8 @@ class NaverBlogReader(
     companion object {
         private const val TAG = "BlogReader"
         private const val CACHE_SIZE = 20
+        /** 캐시된 본문의 수명. 이보다 오래된 것은 다시 받는다 — 고친 글을 옛 본문으로 읽지 않게. */
+        private const val CACHE_TTL_MS = 10 * 60 * 1000L
         private const val UA = "Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
     }
 }

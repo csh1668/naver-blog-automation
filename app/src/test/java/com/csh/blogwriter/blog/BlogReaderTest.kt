@@ -6,6 +6,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -74,13 +75,30 @@ class BlogReaderTest {
         assertEquals(3, posts.size)
         val listReq = server.takeRequest()
         assertEquals("/api/blogs/sampleblog/post-list?categoryNo=0&itemCount=30&page=1", listReq.path)
-        assertEquals("https://m.blog.naver.com/sampleblog", listReq.getHeader("Referer"))
+        assertEquals("${server.url("/").toString().trimEnd('/')}/sampleblog", listReq.getHeader("Referer"))
         assertEquals("NID_AUT=x; NID_SES=y", listReq.getHeader("Cookie"))
 
         val post = reader.readPost("sampleblog", "100000000001")!!
         assertEquals("/PostView.naver?blogId=sampleblog&logNo=100000000001", server.takeRequest().path)
         // 같은 글은 다시 받지 않는다.
         assertSame(post, reader.readPost("sampleblog", "100000000001"))
+        assertEquals(2, server.requestCount)
+        server.shutdown()
+    }
+
+    /** 캐시는 10분만 산다 — 고친 글을 "다시 봐 줘" 하면 새로 받아야 한다. */
+    @Test fun postCacheExpiresAfterTtl() = runTest {
+        val server = MockWebServer().also { it.start() }
+        repeat(2) { server.enqueue(MockResponse().setBody(fixture("post-view.html"))) }
+        var now = 0L
+        val reader = NaverBlogReader(OkHttpClient(), { null }, baseUrl = server.url("/").toString().trimEnd('/'), now = { now })
+
+        assertNotNull(reader.readPost("sampleblog", "100000000001"))
+        assertNotNull(reader.readPost("sampleblog", "100000000001"))
+        assertEquals(1, server.requestCount)
+
+        now += 11 * 60 * 1000L
+        assertNotNull(reader.readPost("sampleblog", "100000000001"))
         assertEquals(2, server.requestCount)
         server.shutdown()
     }

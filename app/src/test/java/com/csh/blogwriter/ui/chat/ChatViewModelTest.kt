@@ -179,9 +179,13 @@ class ChatViewModelTest {
         }
     }
 
-    private class FakeBlogReader(var posts: List<PostSummary>? = listOf(PostSummary("100000000001", "원주 카페 늘봄", 0, 1, 2, "요약", 3))) : BlogReader {
+    private class FakeBlogReader(
+        var posts: List<PostSummary>? = listOf(PostSummary("100000000001", "원주 카페 늘봄", 0, 1, 2, "요약", 3)),
+        /** 목록 읽기가 터지는 상황 — 앱이 죽지 않고 실패 줄로 이어지는지 본다. */
+        var throwOnList: Boolean = false,
+    ) : BlogReader {
         var listCalls = 0
-        override suspend fun listPosts(blogId: String, count: Int): List<PostSummary>? { listCalls++; return posts }
+        override suspend fun listPosts(blogId: String, count: Int): List<PostSummary>? { listCalls++; if (throwOnList) throw IllegalStateException("목록 실패"); return posts }
         override suspend fun readPost(blogId: String, logNo: String): PostText? = null
     }
 
@@ -1173,7 +1177,7 @@ class ChatViewModelTest {
         assertEquals(SessionMode.ADVICE, session.mode)
         assertEquals(1, blog.listCalls)
         val kinds = chatRepo.of(session.id).map { it.kind }
-        assertEquals(MessageKind.BLOG_POSTS, kinds.first())                       // 목록이 첫 메시지보다 먼저 저장된다
+        assertTrue(kinds.indexOf(MessageKind.BLOG_POSTS) > kinds.indexOf(MessageKind.TEXT))  // 읽었다는 줄은 사용자 말 뒤에 온다
         assertEquals(SessionMode.ADVICE, contexts.last().mode)
         assertEquals("원주 카페 늘봄", contexts.last().blogPosts!!.single().title)
         assertEquals("최근 글 봐 줘", session.title)                             // 조언 세션 제목 = 첫 말
@@ -1274,6 +1278,44 @@ class ChatViewModelTest {
         // 모드는 세션이 생긴 뒤 바뀌지 않는다.
         vm.setMode(SessionMode.WRITE)
         assertEquals(SessionMode.ADVICE, vm.uiState.value.mode)
+    }
+
+    /** "보기" 를 누른 그 글을 연다 — 마지막으로 읽은 글이 아니라. 기록은 건드리지 않는다. */
+    @Test
+    fun focusPostOpensTheTappedPostWithoutWritingAnything() = runTest {
+        turns += say("읽었어요")
+        partials = emptyList()
+        val vm = newViewModel()
+        vm.openInitial(null); advanceUntilIdle()
+        vm.setMode(SessionMode.ADVICE)
+        val first = PostView("100000000001", "원주 카페 늘봄")
+        val second = PostView("100000000002", "원주 칼국수 한 그릇")
+        onTurn = { listener -> listener.onPostRead(first.logNo, first.title); listener.onPostRead(second.logNo, second.title) }
+        vm.send("두 글 봐 줘"); advanceUntilIdle()
+
+        val session = chatRepo.sessions.value.single()
+        assertEquals(second, vm.uiState.value.focusedPost)
+        val views = chatRepo.of(session.id).count { it.kind == MessageKind.POST_VIEW }
+
+        vm.focusPost(first); advanceUntilIdle()
+        assertEquals(first, vm.uiState.value.focusedPost)
+        assertTrue(vm.uiState.value.panelOpen)
+        assertEquals(views, chatRepo.of(session.id).count { it.kind == MessageKind.POST_VIEW })
+    }
+
+    /** 목록 읽기가 예외로 터져도 턴은 그대로 돈다 — viewModelScope 로 새어 나가면 앱이 죽는다. */
+    @Test
+    fun adviceFirstTurnSurvivesPostListCrash() = runTest {
+        turns += say("무슨 글인지 알려 주세요")
+        val vm = newViewModel(blog = FakeBlogReader(throwOnList = true))
+        vm.openInitial(null); advanceUntilIdle()
+        vm.setMode(SessionMode.ADVICE)
+        vm.send("칼국수 글 어때?"); advanceUntilIdle()
+
+        val session = chatRepo.sessions.value.single()
+        assertTrue(chatRepo.of(session.id).any { it.kind == MessageKind.SYSTEM && ChatPayloads.readText(it.payloadJson) == ChatViewModel.POSTS_FAILED })
+        assertEquals("무슨 글인지 알려 주세요", ChatPayloads.readText(chatRepo.of(session.id).last { it.kind == MessageKind.TEXT }.payloadJson))
+        assertFalse(vm.uiState.value.thinking)
     }
 
     @Test

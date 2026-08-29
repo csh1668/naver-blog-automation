@@ -410,6 +410,12 @@ class ChatViewModel @Inject constructor(
         _uiState.update { it.copy(panelOpen = open && it.hasPanel, listCollapsed = if (open) true else it.listCollapsed) }
     }
 
+    /** 조언 대화의 "…글을 읽었어요 · 보기" 를 누르면 그 글을 오른쪽에 건다 — 마지막으로 읽은 글이 아니라. */
+    fun focusPost(view: PostView) {
+        if (_uiState.value.mode != SessionMode.ADVICE) return
+        _uiState.update { it.copy(focusedPost = view, panelOpen = true, listCollapsed = true) }
+    }
+
     /** 계획 줄이나 "초안 열기"에서 부른다 — 이미 열려 있으면 그대로 둔다(토글과 다르다). */
     fun openPanel() = _uiState.update { if (it.hasPanel) it.copy(panelOpen = true, listCollapsed = true) else it }
 
@@ -495,12 +501,13 @@ class ChatViewModel @Inject constructor(
                     system(sessionId, NO_KEY)
                     return@launch
                 }
-                if (session.mode == SessionMode.ADVICE) ensurePostList(sessionId)
                 // 턴이 실제로 시작될 때만 사진판을 비운다 (대화의 사진 목록에는 그대로 남는다).
                 _uiState.update { it.copy(trayFrom = it.attachments.size) }
                 if (userText != null) {
                     chatRepo.appendMessage(sessionId, MessageRole.USER, MessageKind.TEXT, ChatPayloads.text(userText))
                 }
+                // 사용자 말을 남긴 뒤에 읽는다 — "글 목록을 읽었어요" 줄이 질문 앞에 끼어들지 않게.
+                if (session.mode == SessionMode.ADVICE) ensurePostList(sessionId)
                 val result = try {
                     runner.runTurn(context(session, draftTurn), listenerFor(sessionId))
                 } catch (e: CancellationException) {
@@ -530,7 +537,8 @@ class ChatViewModel @Inject constructor(
         if (history.any { it.kind == MessageKind.BLOG_POSTS || (it.kind == MessageKind.SYSTEM && ChatPayloads.readText(it.payloadJson) == POSTS_FAILED) }) return
         val blogId = _uiState.value.blogId ?: return
         _uiState.update { it.copy(toolStatus = READING_POSTS) }
-        val posts = blog.listPosts(blogId)
+        // 목록 읽기가 터져도 앱을 죽이지 않는다(viewModelScope 로 새어 나간다) — 실패 줄로 이어 간다.
+        val posts = try { blog.listPosts(blogId) } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
         if (posts == null) system(sessionId, POSTS_FAILED)
         else chatRepo.appendMessage(sessionId, MessageRole.SYSTEM, MessageKind.BLOG_POSTS, ChatPayloads.blogPosts(posts))
         _uiState.update { it.copy(toolStatus = null) }

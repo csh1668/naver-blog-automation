@@ -583,11 +583,15 @@ private fun MessageItem(message: ChatMessage, panelOpen: Boolean, viewModel: Cha
             Text("최근 글 ${count}개를 읽었어요", style = AppTheme.typography.caption, color = AppTheme.colors.textTertiary,
                 modifier = Modifier.padding(horizontal = AppSpacing.sm, vertical = AppSpacing.xs))
         }
-        MessageKind.POST_VIEW -> Text(
-            "'${ChatPayloads.readPostView(message.payloadJson)?.title.orEmpty()}' 글을 읽었어요 · 보기",
-            style = AppTheme.typography.body2, color = AppTheme.colors.fillBrand,
-            modifier = Modifier.fillMaxWidth().clickable(onClick = viewModel::openPanel).padding(horizontal = AppSpacing.sm, vertical = AppSpacing.md),
-        )
+        // 누른 줄의 글을 열어야 한다 — 그냥 패널만 열면 마지막으로 읽은 글이 나온다.
+        MessageKind.POST_VIEW -> {
+            val view = ChatPayloads.readPostView(message.payloadJson)
+            Text(
+                "'${view?.title.orEmpty()}' 글을 읽었어요 · 보기",
+                style = AppTheme.typography.body2, color = AppTheme.colors.fillBrand,
+                modifier = Modifier.fillMaxWidth().clickable { view?.let(viewModel::focusPost) }.padding(horizontal = AppSpacing.sm, vertical = AppSpacing.md),
+            )
+        }
     }
 }
 
