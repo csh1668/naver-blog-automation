@@ -44,4 +44,14 @@ class TurnResponseTest {
         assertEquals(3, TurnSchemas.functionDeclarations().size)
         assertEquals(listOf("web_search", "open_page", "remember"), TurnSchemas.functionDeclarations().map { it.name })
     }
+
+    @Test
+    fun tableBlockRoundTrips() {
+        val json = """{"title":"t","blocks":[{"type":"table","rows":[["주소","원주시 어딘가 1"],["전화","033-000-0000"]]}]}"""
+        val post = com.csh.blogwriter.domain.model.PostContentJson.decode(json)
+        val table = post.blocks.single() as com.csh.blogwriter.domain.model.Block.Table
+        assertEquals(2, table.rows.size)
+        assertEquals("전화", table.rows[1][0])
+        assertTrue(com.csh.blogwriter.domain.model.PostContentJson.encode(post).contains("\"type\":\"table\""))
+    }
 }

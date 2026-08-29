@@ -519,6 +519,7 @@ class ChatViewModel @Inject constructor(
         when (block) {
             is Block.Paragraph -> block.runs.sumOf { run -> run.text.count { !it.isWhitespace() } }
             is Block.Quote -> block.text.count { !it.isWhitespace() }
+            is Block.Table -> block.rows.sumOf { row -> row.sumOf { cell -> cell.count { !it.isWhitespace() } } }
             else -> 0
         }
     }

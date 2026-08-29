@@ -13,7 +13,7 @@ class PostContentRepairTest {
             Block.Paragraph(listOf(Run("a"))), Block.Image("img_009"), Block.Image("img_001"), Block.Paragraph(listOf(Run("b"))), Block.Image("img_001"),
         ))
         val r = PostContentRepair.repair(post, attachedRefs = listOf("img_001", "img_002"))
-        assertEquals(listOf("paragraph", "image:img_001", "paragraph", "image:img_002"), r.content.blocks.map { b -> when (b) { is Block.Image -> "image:${b.ref}"; is Block.Paragraph -> "paragraph"; is Block.Quote -> "quote" } })
+        assertEquals(listOf("paragraph", "image:img_001", "paragraph", "image:img_002"), r.content.blocks.map { b -> when (b) { is Block.Image -> "image:${b.ref}"; is Block.Paragraph -> "paragraph"; is Block.Quote -> "quote"; is Block.Table -> "table" } })
         assertEquals(3, r.fixes.size)
     }
 

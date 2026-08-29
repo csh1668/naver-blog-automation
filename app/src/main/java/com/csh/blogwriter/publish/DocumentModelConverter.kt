@@ -35,6 +35,10 @@ class DocumentModelConverter(private val idGenerator: () -> String = { "SE-" + U
                         representAssigned = true
                     }
                     is Block.Quote -> { flush(); add(quoteComponent(block)) }
+                    // TODO 스마트에디터 표(table) 컴포넌트 형식을 확인하면 진짜 표로 바꾼다. 그때까지는 "항목 : 값" 문단으로.
+                    is Block.Table -> block.rows.filter { it.isNotEmpty() }.forEach { row ->
+                        pendingParagraphs += Block.Paragraph(listOf(Run(row.joinToString(" : "))))
+                    }
                 }
             }
             flush()

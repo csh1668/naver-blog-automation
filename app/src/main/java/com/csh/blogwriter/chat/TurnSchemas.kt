@@ -37,6 +37,10 @@ object TurnSchemas {
             add(buildJsonObject { put("type", "object"); putJsonObject("properties") {
                 put("type", buildJsonObject { put("type", "string"); putJsonArray("enum") { add("quote") } }); put("text", str()); put("source", nullable(str()))
             }; putJsonArray("required") { add("type"); add("text") } })
+            add(buildJsonObject { put("type", "object"); putJsonObject("properties") {
+                put("type", buildJsonObject { put("type", "string"); putJsonArray("enum") { add("table") } })
+                put("rows", buildJsonObject { put("type", "array"); put("description", "2열 표. 각 행은 [항목명, 값]"); put("items", arrayOf(str())) })
+            }; putJsonArray("required") { add("type"); add("rows") } })
         }
     }
     val postContent: JsonObject = buildJsonObject {

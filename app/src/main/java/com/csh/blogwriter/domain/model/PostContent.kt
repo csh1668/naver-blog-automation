@@ -19,6 +19,10 @@ sealed interface Block {
 
     @Serializable @SerialName("quote")
     data class Quote(val text: String, val source: String? = null) : Block
+
+    /** 2열 정보 표(가게 정보 등). rows = [["주소", "…"], ["전화", "…"]]. 첫 열은 항목명. */
+    @Serializable @SerialName("table")
+    data class Table(val rows: List<List<String>>) : Block
 }
 
 @Serializable
