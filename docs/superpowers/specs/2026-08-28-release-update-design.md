@@ -11,7 +11,7 @@
 
 ## 2. 시작 시 업데이트 확인 (FR-12.2)
 - `update/UpdateChecker.kt`: `GET https://api.github.com/repos/<owner>/<repo>/releases/latest` (OkHttp, 5초 제한, `Accept: application/vnd.github+json`, 인증 없음 — 공개 저장소 전제; 비공개면 SP2의 관리자 설정에 토큰 항목 추가). 응답의 `tag_name`(`v1.2.3`)을 `BuildConfig.VERSION_NAME`과 SemVer 비교. 결과 `UpdateInfo(tag, htmlUrl, apkUrl?)`.
-- 호출 시점: 앱 시작 후 Home 진입 시 1회, 6시간에 한 번만(DataStore에 마지막 확인 시각). 실패는 무시(로그만).
+- 호출 시점: 앱 시작 후 채팅 화면 진입 시마다(10분 안의 재진입은 생략 — DataStore에 마지막 확인 시각). 실패는 무시(로그만).
 - UI: Home 상단 `InlineBanner(kind = Info)` "새 버전(v1.2.3)이 나왔어요 — 받으러 가기" → `ACTION_VIEW` 로 릴리스 페이지(`html_url`) 열기. 배너는 닫기 가능(같은 태그는 다시 표시하지 않음).
 - 저장소 좌표: `BuildConfig.GITHUB_REPO = "csh1668/naver-blog-automation"`(가정 — 실제 저장소 생성 시 확정), `app/build.gradle.kts`의 `buildConfigField`.
-- 테스트: SemVer 비교(`v0.1.0` < `v0.2.0`, `v0.1.0-rc1` 처리는 하지 않음 — 태그는 항상 `vMAJOR.MINOR.PATCH`), MockWebServer로 200/404/타임아웃, 6시간 스로틀.
+- 테스트: SemVer 비교(`v0.1.0` < `v0.2.0`, `v0.1.0-rc1` 처리는 하지 않음 — 태그는 항상 `vMAJOR.MINOR.PATCH`), MockWebServer로 200/404/타임아웃, 10분 스로틀.

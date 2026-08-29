@@ -294,7 +294,19 @@ class ChatViewModelTest {
     // ---- 새 버전 배너 (FR-12) ----
 
     @Test
-    fun throttledWithinSixHoursSkipsCheck() = runTest {
+    fun checkedAnHourAgoChecksAgain() = runTest {
+        settings.lastCheckAt.value = System.currentTimeMillis() - 60 * 60 * 1000L
+        val checker = FakeUpdateChecker(UpdateInfo("v9.9.9", "https://example.com"))
+
+        val vm = newViewModel(checker = checker)
+        advanceUntilIdle()
+
+        assertEquals(1, checker.callCount)
+        assertEquals(UpdateInfo("v9.9.9", "https://example.com"), vm.updateInfo.value)
+    }
+
+    @Test
+    fun checkedMomentsAgoSkipsCheck() = runTest {
         settings.lastCheckAt.value = System.currentTimeMillis()
         val checker = FakeUpdateChecker(UpdateInfo("v9.9.9", "https://example.com"))
 

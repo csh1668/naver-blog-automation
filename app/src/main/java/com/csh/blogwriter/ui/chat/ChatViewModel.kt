@@ -81,7 +81,8 @@ class ChatViewModel @Inject constructor(
         const val MIN_GROUP = 2
         const val MAX_GROUP = 4
         /** 새 버전 확인은 이 간격 안에서는 건너뛴다 (FR-12). */
-        private const val UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
+        /** 앱을 켤 때마다 확인하되, 설정 화면을 오가며 ViewModel 이 다시 만들어질 때의 연속 호출만 막는다. */
+        private const val UPDATE_CHECK_INTERVAL_MS = 10 * 60 * 1000L
         private val DRAFT_WORDS = Regex("초안|써 줘|작성해")
     }
 
@@ -95,7 +96,7 @@ class ChatViewModel @Inject constructor(
     private val _reinject = MutableSharedFlow<PostContent>(extraBufferCapacity = 4)
     val reinject: SharedFlow<PostContent> = _reinject
 
-    /** 새 버전 배너 (FR-12). 켤 때마다 묻지 않도록 6시간에 한 번만 확인한다. */
+    /** 새 버전 배너 (FR-12). 켤 때마다 확인한다(10분 안의 연속 호출만 생략). */
     private val _updateInfo = MutableStateFlow<UpdateInfo?>(null)
     val updateInfo: StateFlow<UpdateInfo?> = _updateInfo.asStateFlow()
 
