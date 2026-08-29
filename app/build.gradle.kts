@@ -21,8 +21,8 @@ android {
         applicationId = "com.csh.blogwriter"
         minSdk = 33
         targetSdk = 37
-        versionCode = 4
-        versionName = "0.3.1"
+        versionCode = 5
+        versionName = "0.3.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "GITHUB_REPO", "\"csh1668/naver-blog-automation\"")
     }
