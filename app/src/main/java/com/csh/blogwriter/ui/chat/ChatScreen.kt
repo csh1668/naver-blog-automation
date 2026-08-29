@@ -348,7 +348,7 @@ private fun ChatPane(
             )
         }
         // 아직 말이 오가지 않은 새 글(사진만 붙여 둔 것도 포함) — 목록 대신 큰 제목과 가운데 입력창을 보여 준다.
-        if (!ui.thinking && ui.messages.none { it.kind != MessageKind.PHOTOS }) {
+        if (!ui.thinking && ui.messages.none { it.kind != MessageKind.PHOTOS && it.kind != MessageKind.PHOTO_GROUPS }) {
             Column(
                 Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.Center,
@@ -362,7 +362,7 @@ private fun ChatPane(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg),
                     )
                     Spacer(Modifier.height(AppSpacing.section))
-                    AttachmentTray(ui.tray, viewModel)
+                    AttachmentTray(ui, viewModel)
                     composer(true)
                     if (!ui.loggedIn) LoginNudge(onLogin)
                 }
@@ -379,7 +379,7 @@ private fun ChatPane(
             }
             ui.draftGate?.let { gate -> DraftGateCard(gate, viewModel) }
             QuickReplyChips(ui.quickReplies) { justSent = true; viewModel.sendQuickReply(it) }
-            AttachmentTray(ui.tray, viewModel)
+            AttachmentTray(ui, viewModel)
             // 계획이 있고 아직 초안이 없는 동안에는 초안 버튼이 입력창 위에 늘 걸려 있다.
             val published = ui.session?.status == SessionStatus.PUBLISHED
             if (ui.plan != null && ui.panelJobId == null && !ui.thinking && ui.draftGate == null && !published) {
@@ -427,23 +427,84 @@ private fun DraftGateCard(gate: DraftGate, viewModel: ChatViewModel) {
     }
 }
 
-/** 입력창 위에 걸리는 사진판. 보내기 전에 빼거나 순서를 바꿀 수 있다. */
+/**
+ * 입력창 위에 걸리는 사진판. 보내기 전에 빼거나 순서를 바꿀 수 있고, 여기서 사진을 묶는다.
+ * 묶는 동안에는 이미 보낸 사진까지 다 보여 주고(묶음은 글 전체에 걸린다) 탭만 받는다.
+ */
 @Composable
-private fun AttachmentTray(photos: List<AttachedPhoto>, viewModel: ChatViewModel) {
-    if (photos.isEmpty()) return
+private fun AttachmentTray(ui: ChatUiState, viewModel: ChatViewModel) {
+    if (ui.attachments.isEmpty()) return
+    val c = AppTheme.colors
+    val photos: List<AttachedPhoto> = if (ui.grouping) ui.attachments else ui.tray
     val uris = remember(photos) { photos.map { Uri.parse(it.uri) } }
+    val badges = remember(photos, ui.photoGroups) {
+        val groupOf = ui.groupOf
+        photos.mapNotNull { p -> groupOf[p.ref]?.let { Uri.parse(p.uri) to it } }.toMap()
+    }
+    val picks = remember(photos, ui.groupPicks) {
+        photos.mapNotNull { p -> ui.groupPicks?.indexOf(p.ref)?.takeIf { it >= 0 }?.let { Uri.parse(p.uri) to it + 1 } }.toMap()
+    }
+    // 초안이 나온 뒤에는 묶음을 바꿀 수 없다 — 에디터에 이미 들어간 사진 자리를 흔들지 않으려고.
+    val canGroup = ui.panelJobId == null && ui.attachments.size >= ChatViewModel.MIN_GROUP
     Column(Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
-        Text("붙인 사진 ${photos.size}장", style = AppTheme.typography.caption, color = AppTheme.colors.textSecondary)
-        Spacer(Modifier.height(AppSpacing.sm))
-        // 많이 고르면 사진판이 화면을 다 먹는다 — 높이를 묶고 그 안에서 넘긴다.
-        Box(Modifier.heightIn(max = TRAY_MAX_HEIGHT).verticalScroll(rememberScrollState())) {
-            PhotoGrid(
-                uris = uris,
-                // 위치는 사진판 기준으로 그대로 넘긴다 (뷰모델이 안 보낸 사진 시작점을 더한다).
-                onRemove = { uri -> photos.firstOrNull { it.uri == uri.toString() }?.let { viewModel.removePhoto(it.ref) } },
-                onMove = { from, to -> viewModel.movePhoto(from, to) },
-                columns = 5,
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (ui.grouping) "한 묶음으로 낼 사진을 ${ChatViewModel.MIN_GROUP}~${ChatViewModel.MAX_GROUP}장 골라 주세요"
+                else "붙인 사진 ${ui.attachments.size}장",
+                style = AppTheme.typography.caption, color = c.textSecondary, modifier = Modifier.weight(1f),
             )
+            if (canGroup && !ui.grouping) {
+                TextButton(onClick = viewModel::startGrouping, modifier = Modifier.heightIn(min = AppSpacing.touchTarget)) { Text("사진 묶기", style = AppTheme.typography.body2, color = c.fillBrand) }
+            }
+        }
+        // 사진판이 비어 있어도(다 보낸 뒤) 묶음은 여기서 풀 수 있어야 한다.
+        if (canGroup && !ui.grouping && ui.photoGroups.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+                ui.photoGroups.forEachIndexed { index, group ->
+                    TextButton(onClick = { viewModel.ungroup(index) }, modifier = Modifier.heightIn(min = AppSpacing.touchTarget)) {
+                        Text("묶음 ${index + 1}(${group.size}장) 풀기", style = AppTheme.typography.body2, color = c.fillBrand)
+                    }
+                }
+            }
+        }
+        if (uris.isNotEmpty()) {
+            Spacer(Modifier.height(AppSpacing.sm))
+            // 많이 고르면 사진판이 화면을 다 먹는다 — 높이를 묶고 그 안에서 넘긴다.
+            Box(Modifier.heightIn(max = TRAY_MAX_HEIGHT).verticalScroll(rememberScrollState())) {
+                PhotoGrid(
+                    uris = uris,
+                    // 위치는 사진판 기준으로 그대로 넘긴다 (뷰모델이 안 보낸 사진 시작점을 더한다).
+                    onRemove = { uri -> photos.firstOrNull { it.uri == uri.toString() }?.let { viewModel.removePhoto(it.ref) } },
+                    onMove = { from, to -> viewModel.movePhoto(from, to) },
+                    columns = 5,
+                    selectedOrder = picks,
+                    badges = badges,
+                    onTap = if (ui.grouping) {
+                        { uri -> photos.firstOrNull { it.uri == uri.toString() }?.let { viewModel.toggleGroupPick(it.ref) } }
+                    } else null,
+                    onBadgeTap = if (canGroup) {
+                        { uri ->
+                            val ref = photos.firstOrNull { it.uri == uri.toString() }?.ref
+                            ui.photoGroups.indexOfFirst { ref != null && ref in it }.takeIf { it >= 0 }?.let(viewModel::ungroup)
+                        }
+                    } else null,
+                    showControls = !ui.grouping,
+                )
+            }
+        }
+        if (ui.grouping) {
+            Spacer(Modifier.height(AppSpacing.sm))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+                Text("${ui.groupPicks?.size ?: 0}장 선택", style = AppTheme.typography.body2, color = c.textSecondary)
+                Box(Modifier.weight(1f)) { WeakButton("취소", onClick = viewModel::cancelGrouping) }
+                Box(Modifier.weight(1f)) {
+                    BottomCta(
+                        "묶음 완료",
+                        onClick = viewModel::finishGrouping,
+                        enabled = (ui.groupPicks?.size ?: 0) in ChatViewModel.MIN_GROUP..ChatViewModel.MAX_GROUP,
+                    )
+                }
+            }
         }
     }
 }
@@ -481,6 +542,16 @@ private fun MessageItem(message: ChatMessage, panelOpen: Boolean, viewModel: Cha
                     WeakButton("초안 열기", onClick = viewModel::togglePanel)
                 }
             }
+        }
+        // 묶음은 사진판에서 만들고 푼다 — 목록에는 무슨 일이 있었는지 한 줄만 남긴다.
+        MessageKind.PHOTO_GROUPS -> SystemMessage {
+            val groups = ChatPayloads.readPhotoGroups(message.payloadJson).orEmpty()
+            Text(
+                if (groups.isEmpty()) "사진 묶음을 풀었어요" else "사진 ${groups.last().size}장을 한 묶음으로 정했어요",
+                style = AppTheme.typography.caption,
+                color = AppTheme.colors.textTertiary,
+                modifier = Modifier.padding(horizontal = AppSpacing.sm, vertical = AppSpacing.xs),
+            )
         }
         MessageKind.SYSTEM -> SystemMessage {
             val text = ChatPayloads.readText(message.payloadJson)

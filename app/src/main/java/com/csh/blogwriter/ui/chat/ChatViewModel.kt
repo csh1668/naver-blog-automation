@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -76,6 +77,9 @@ class ChatViewModel @Inject constructor(
         const val GATE_FIX = "고쳐 달라고 하기"
         /** 목표 글자 수에서 이만큼은 봐준다. */
         private const val LENGTH_TOLERANCE = 0.1
+        /** 한 묶음에 넣을 수 있는 사진 수. */
+        const val MIN_GROUP = 2
+        const val MAX_GROUP = 4
         /** 새 버전 확인은 이 간격 안에서는 건너뛴다 (FR-12). */
         private const val UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
         private val DRAFT_WORDS = Regex("초안|써 줘|작성해")
@@ -158,12 +162,14 @@ class ChatViewModel @Inject constructor(
             val session = detachVanishedJob(stored)
             val history = chatRepo.messagesOnce(session.id)
             val photos = restoreAttachments(history)
+            val groups = restoreGroups(history, photos.map { it.ref })
             // 이어 쓰던 글이나 세워 둔 계획이 있으면 오른쪽을 바로 펼쳐 준다 — "보기"를 다시 누르지 않게.
             val hasSomethingToShow = session.pendingJobId != null || history.any { it.kind == MessageKind.PLAN }
             // 새 상태로 통째로 갈아 끼운다 — thinking·streamingSay·toolStatus·칩이 함께 초기화된다.
             _uiState.value = ChatUiState(
                 session = session,
                 attachments = photos,
+                photoGroups = groups,
                 // 이전에 붙였던 사진은 이미 대화에 반영돼 있으므로 사진판은 비운 채로 연다.
                 trayFrom = photos.size,
                 panelJobId = session.pendingJobId,
@@ -268,10 +274,77 @@ class ChatViewModel @Inject constructor(
      * 빈 번호가 생기면 초안의 사진 자리를 찾지 못한다. (캐시는 uri 로 잡혀 있어 번호가 바뀌어도 안전하다.)
      */
     fun removePhoto(ref: String) {
-        _uiState.update { state ->
+        updateWithGroups { state ->
             val kept = state.attachments.filterNot { it.ref == ref }
-            state.copy(attachments = renumber(kept), trayFrom = state.trayFrom.coerceAtMost(kept.size))
+            val renumbered = renumber(kept)
+            state.copy(
+                attachments = renumbered,
+                trayFrom = state.trayFrom.coerceAtMost(kept.size),
+                photoGroups = remapGroups(state.photoGroups, state.attachments, renumbered),
+                groupPicks = state.groupPicks?.let { remapRefs(it, state.attachments, renumbered) },
+            )
         }
+    }
+
+    // ---- 사진 묶기 ----
+
+    /** 사진 2~4장을 한 묶음으로 고르기 시작한다. 초안이 나온 뒤에는 묶음을 바꿀 수 없다. */
+    fun startGrouping() {
+        if (_uiState.value.panelJobId != null) return
+        _uiState.update { it.copy(groupPicks = emptyList()) }
+    }
+
+    /** 묶기 모드에서 사진 하나를 고르거나 뺀다. 이미 다른 묶음에 든 사진과 다섯 번째 사진은 받지 않는다. */
+    fun toggleGroupPick(ref: String) {
+        _uiState.update { state ->
+            val picks = state.groupPicks ?: return@update state
+            when {
+                ref in picks -> state.copy(groupPicks = picks - ref)
+                state.photoGroups.any { ref in it } -> state
+                picks.size >= MAX_GROUP -> state
+                else -> state.copy(groupPicks = picks + ref)
+            }
+        }
+    }
+
+    /** 고른 사진이 2~4장이면 묶음으로 만든다. 아니면 그냥 묶기 모드를 닫는다. */
+    fun finishGrouping() {
+        updateWithGroups { state ->
+            val picks = state.groupPicks ?: return@updateWithGroups state
+            val made = if (picks.size in MIN_GROUP..MAX_GROUP) state.photoGroups + listOf(picks) else state.photoGroups
+            state.copy(photoGroups = made, groupPicks = null)
+        }
+    }
+
+    fun cancelGrouping() = _uiState.update { it.copy(groupPicks = null) }
+
+    /** [groupIndex] 번째 묶음을 푼다. */
+    fun ungroup(groupIndex: Int) {
+        updateWithGroups { state ->
+            if (groupIndex !in state.photoGroups.indices) state
+            else state.copy(photoGroups = state.photoGroups.filterIndexed { i, _ -> i != groupIndex })
+        }
+    }
+
+    /** 상태를 바꾸고, 묶음이 달라졌으면 대화에 남긴다 — 다시 열 때 마지막 것으로 되살린다. */
+    private fun updateWithGroups(transform: (ChatUiState) -> ChatUiState) {
+        val before = _uiState.value.photoGroups
+        val after = _uiState.updateAndGet(transform).photoGroups
+        if (after == before) return
+        val session = _uiState.value.session ?: return
+        viewModelScope.launch {
+            chatRepo.appendMessage(session.id, MessageRole.USER, MessageKind.PHOTO_GROUPS, ChatPayloads.photoGroups(after))
+        }
+    }
+
+    /** 번호를 다시 매기거나 사진을 뺀 뒤의 묶음. uri 로 따라가고, 한 장 이하로 줄어든 묶음은 없앤다. */
+    private fun remapGroups(groups: List<List<String>>, old: List<AttachedPhoto>, new: List<AttachedPhoto>) =
+        groups.map { remapRefs(it, old, new) }.filter { it.size >= MIN_GROUP }
+
+    private fun remapRefs(refs: List<String>, old: List<AttachedPhoto>, new: List<AttachedPhoto>): List<String> {
+        val uriByRef = old.associate { it.ref to it.uri }
+        val refByUri = new.associate { it.uri to it.ref }
+        return refs.mapNotNull { refByUri[uriByRef[it]] }
     }
 
     /**
@@ -279,14 +352,19 @@ class ChatViewModel @Inject constructor(
      * 순서가 곧 글에 들어갈 순서라 ref 도 함께 다시 매긴다.
      */
     fun movePhoto(from: Int, to: Int) {
-        _uiState.update { state ->
+        updateWithGroups { state ->
             val offset = state.trayFrom.coerceIn(0, state.attachments.size)
             val source = offset + from
             val target = offset + to
-            if (source !in state.attachments.indices || target !in state.attachments.indices) return@update state
+            if (source !in state.attachments.indices || target !in state.attachments.indices) return@updateWithGroups state
             val list = state.attachments.toMutableList()
             list.add(target, list.removeAt(source))
-            state.copy(attachments = renumber(list))
+            val renumbered = renumber(list)
+            state.copy(
+                attachments = renumbered,
+                photoGroups = remapGroups(state.photoGroups, state.attachments, renumbered),
+                groupPicks = state.groupPicks?.let { remapRefs(it, state.attachments, renumbered) },
+            )
         }
     }
 
@@ -430,6 +508,7 @@ class ChatViewModel @Inject constructor(
         return ChatContext(
             history = history,
             attachments = photoAttachments.attachments(session.id, _uiState.value.attachments),
+            photoGroups = _uiState.value.photoGroups,
             style = style,
             draftTurn = draftTurn,
             // 초안이 나오기 전까지는 계획을 함께 보낸다 — 모델이 "이 계획을 고쳐라"로 읽는다.
@@ -627,4 +706,15 @@ class ChatViewModel @Inject constructor(
                 .flatMap { payload -> payload.refs.zip(payload.uris) { ref, uri -> AttachedPhoto(ref, uri, null) } }
                 .distinctBy { it.uri }
         )
+
+    /**
+     * 마지막 PHOTO_GROUPS 메시지가 지금 남아 있는 사진에 대해 뜻이 통하는 만큼만 되살린다
+     * (사진이 사라져 한 장 이하로 줄어든 묶음은 버린다).
+     */
+    private fun restoreGroups(history: List<ChatMessage>, refs: List<String>): List<List<String>> =
+        history.lastOrNull { it.kind == MessageKind.PHOTO_GROUPS }
+            ?.let { ChatPayloads.readPhotoGroups(it.payloadJson) }
+            .orEmpty()
+            .map { group -> group.filter { it in refs } }
+            .filter { it.size >= MIN_GROUP }
 }

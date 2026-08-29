@@ -395,4 +395,20 @@ class ConversationEngineTest {
         assertFalse(second.contains("thinkingConfig"))
         assertTrue(second.contains("responseJsonSchema"))
     }
+
+    /** 사용자가 묶어 둔 사진은 요청에 한 줄로 실리고, 초안 보정에도 그대로 넘어간다. */
+    @Test
+    fun userPhotoGroupsGoIntoTheRequestAndTheRepair() = runTest {
+        server.enqueue(textResponse("""{"say":"초안이에요","readyToDraft":true,"post":{"title":"제목","blocks":[{"type":"image","ref":"img_001"},{"type":"image","ref":"img_002"}]}}"""))
+        val ctx = ctx(draft = true).copy(
+            attachments = listOf(Attachment("img_001", "AAAA"), Attachment("img_002", "BBBB")),
+            photoGroups = listOf(listOf("img_001", "img_002")),
+        )
+        val r = engine.runTurn(ctx, Recorder()) as TurnResult.Success
+
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(body.contains("사용자가 묶어 둔 사진: [img_001, img_002]"))
+        val group = r.response.post!!.blocks.single() as com.csh.blogwriter.domain.model.Block.ImageGroup
+        assertEquals(listOf("img_001", "img_002"), group.refs)
+    }
 }

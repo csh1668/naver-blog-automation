@@ -10,7 +10,8 @@ import javax.inject.Inject
 
 enum class SessionStatus { DRAFTING, PUBLISHING, PUBLISHED, ARCHIVED }
 enum class MessageRole { USER, ASSISTANT, SYSTEM }
-enum class MessageKind { TEXT, PHOTOS, PLAN, POST, SYSTEM }
+/** [PHOTO_GROUPS] 는 사용자가 정한 사진 묶음 — 모델에는 히스토리로 실리지 않고 화면 복원에만 쓴다. */
+enum class MessageKind { TEXT, PHOTOS, PLAN, POST, SYSTEM, PHOTO_GROUPS }
 
 data class ChatSession(val id: String, val title: String?, val createdAt: Long, val updatedAt: Long, val status: SessionStatus, val pendingJobId: String?, val publishedUrl: String?)
 data class ChatMessage(val id: Long, val sessionId: String, val seq: Int, val role: MessageRole, val kind: MessageKind, val payloadJson: String, val createdAt: Long)

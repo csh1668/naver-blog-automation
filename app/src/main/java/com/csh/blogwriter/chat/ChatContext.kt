@@ -8,6 +8,8 @@ data class Attachment(val ref: String, val jpegBase64: String, val mimeType: Str
 data class ChatContext(
     val history: List<ChatMessage>,
     val attachments: List<Attachment>,
+    /** 사용자가 한 묶음으로 정한 사진들(ref 목록의 목록). 초안에서 imageGroup 하나로 나가야 한다. */
+    val photoGroups: List<List<String>> = emptyList(),
     val style: String?,
     val draftTurn: Boolean,
     /** 지금 오른쪽에 걸려 있는 계획(마크다운). 있으면 "이 계획을 고쳐라"가 된다. */

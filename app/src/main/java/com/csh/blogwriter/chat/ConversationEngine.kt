@@ -54,6 +54,8 @@ class ConversationEngine(
         /** 계획을 내기 전, 아직 더 물어봐도 되는 턴에 붙인다. */
         const val ASK_FACTS = "글에 꼭 필요한 사실(상호·제품명, 위치, 먹거나 산 것과 가격, 방문 계기·동행, 좋았던 점·아쉬웠던 점)이 " +
             "비어 있으면 question 으로 한 번에 1~2개만 묻고 plan 은 비워 두세요. 이미 충분하면 바로 plan 을 내세요."
+        /** 사용자가 묶어 둔 사진 줄의 머리말. */
+        const val USER_GROUP = "사용자가 묶어 둔 사진: "
         /** 질문 횟수를 다 쓴 턴에 붙인다. */
         const val STOP_ASKING = "더 묻지 말고 지금 있는 정보로 plan 을 내세요. 모르는 값은 검색해서 채우거나 '(확인 필요)' 로 표시하세요."
     }
@@ -108,7 +110,7 @@ class ConversationEngine(
             try {
                 Log.d(TAG, "attempt $attempts/$maxAttempts model=${pick.model} key=…${pick.keyId.takeLast(4)} schema=$useSchema")
                 val result = runWithTools(
-                    secret, pick.model, system, contents, attachedRefs, policy, useSchema,
+                    secret, pick.model, system, contents, attachedRefs, ctx.photoGroups, policy, useSchema,
                     if (useThinking) thinkingLevel else null, tools, listener,
                 )
                 Log.d(TAG, "attempt $attempts ok model=${pick.model}")
@@ -171,6 +173,7 @@ class ConversationEngine(
         system: String,
         base: List<GContent>,
         attachedRefs: List<String>,
+        userGroups: List<List<String>>,
         policy: ModelPolicy,
         useSchema: Boolean,
         thinkingLevel: String?,
@@ -230,7 +233,7 @@ class ConversationEngine(
                 if (!jsonRetry) { jsonRetry = true; temperature = 0.0; continue }
                 throw BadResponse("JSON 해석 실패: ${it.message}")
             }
-            val repaired = parsed.post?.let { PostContentRepair.repair(it, attachedRefs) }
+            val repaired = parsed.post?.let { PostContentRepair.repair(it, attachedRefs, userGroups) }
             return TurnResult.Success(if (repaired != null) parsed.copy(post = repaired.content) else parsed, repaired?.fixes ?: emptyList(), model)
         }
     }
@@ -251,6 +254,10 @@ class ConversationEngine(
         if (ctx.attachments.isNotEmpty()) {
             val parts = mutableListOf(GPart(text = "첨부 사진 (ref 순서대로):"))
             ctx.attachments.forEach { a -> parts += GPart(text = "ref=${a.ref}"); parts += GPart(inlineData = GInlineData(a.mimeType, a.jpegBase64)) }
+            // 사용자가 직접 묶은 사진은 반드시 그 묶음 그대로 나가야 한다 — 사진 목록 바로 뒤에 한 줄씩 붙인다.
+            ctx.photoGroups.forEach { group ->
+                parts += GPart(text = "$USER_GROUP[${group.joinToString(", ")}] — 이 사진들은 imageGroup 블록 하나(COLLAGE)로만 쓰고 따로 떼지 않는다")
+            }
             out += GContent("user", parts)
         }
         ctx.history.forEach { m ->
@@ -262,7 +269,8 @@ class ConversationEngine(
                 // 계획은 마크다운 전문 그대로 보여 준다 (payload 는 {"markdown": …} 래퍼일 뿐이다).
                 MessageKind.PLAN -> "[계획]\n" + runCatching { json.parseToJsonElement(m.payloadJson).jsonObject["markdown"]!!.jsonPrimitive.content }.getOrDefault(m.payloadJson)
                 MessageKind.POST -> m.payloadJson
-                MessageKind.SYSTEM -> return@forEach
+                // 사진 묶음은 첨부 목록 뒤에 이미 한 줄씩 실려 나갔다 — 히스토리로 또 넣지 않는다.
+                MessageKind.SYSTEM, MessageKind.PHOTO_GROUPS -> return@forEach
             }
             out += GContent(role, listOf(GPart(text = text)))
         }

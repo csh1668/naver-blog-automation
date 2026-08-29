@@ -36,4 +36,47 @@ class PostContentRepairTest {
         assertEquals(listOf("img_001", "img_002", "img_003"), r.content.imageRefs())
         assertEquals(3, r.fixes.size)
     }
+
+    /** 모델이 낱장으로 흩어 놨어도 사용자가 묶어 둔 사진은 imageGroup 하나로 모은다. */
+    @Test
+    fun userGroupsAreForcedOntoSinglePhotos() {
+        val post = PostContent("제목", listOf(
+            Block.Image("img_001"), Block.Paragraph(listOf(Run("사이 글"))), Block.Image("img_002"), Block.Image("img_003"),
+        ))
+        val r = PostContentRepair.repair(post, listOf("img_001", "img_002", "img_003"), listOf(listOf("img_001", "img_002")))
+        assertEquals(listOf("group", "paragraph", "image:img_003"), kinds(r.content))
+        assertEquals(listOf("img_001", "img_002"), (r.content.blocks[0] as Block.ImageGroup).refs)
+        assertEquals(listOf("img_001", "img_002", "img_003"), r.content.imageRefs())
+        assertEquals(listOf(PostContentRepair.GROUPED + "img_001,img_002"), r.fixes)
+    }
+
+    /** 모델이 다른 조합으로 묶었으면 사용자 묶음대로 다시 짠다 — 남은 사진은 낱장으로 돌아간다. */
+    @Test
+    fun aDifferentGroupingIsRebuiltAsTheUserAskedFor() {
+        val post = PostContent("제목", listOf(
+            Block.ImageGroup(listOf("img_002", "img_003")), Block.Image("img_001"),
+        ))
+        val r = PostContentRepair.repair(post, listOf("img_001", "img_002", "img_003"), listOf(listOf("img_001", "img_002")))
+        assertEquals(listOf("group", "image:img_003"), kinds(r.content))
+        assertEquals(listOf("img_001", "img_002"), (r.content.blocks[0] as Block.ImageGroup).refs)
+    }
+
+    /** 이미 그대로 나온 묶음은 건드리지 않는다. */
+    @Test
+    fun anAlreadyCorrectGroupIsLeftAlone() {
+        val post = PostContent("제목", listOf(Block.ImageGroup(listOf("img_001", "img_002"))))
+        val r = PostContentRepair.repair(post, listOf("img_001", "img_002"), listOf(listOf("img_001", "img_002")))
+        assertEquals(listOf("group"), kinds(r.content))
+        assertEquals(emptyList<String>(), r.fixes)
+    }
+
+    private fun kinds(content: PostContent) = content.blocks.map { b ->
+        when (b) {
+            is Block.Image -> "image:${b.ref}"
+            is Block.Paragraph -> "paragraph"
+            is Block.Quote -> "quote"
+            is Block.Table -> "table"
+            is Block.ImageGroup -> "group"
+        }
+    }
 }

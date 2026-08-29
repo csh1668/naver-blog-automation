@@ -35,7 +35,17 @@ data class ChatUiState(
     val draftGate: DraftGate? = null,
     /** [attachments] 중 여기부터가 "아직 안 보낸" 사진 — 입력창 위 사진판에 보여 주고 보내면 비운다. */
     val trayFrom: Int = 0,
+    /** 사용자가 한 묶음으로 정한 사진들(ref 목록의 목록). 서로 겹치지 않고 묶음마다 2~4장이다. */
+    val photoGroups: List<List<String>> = emptyList(),
+    /** 묶기 모드에서 고른 ref — 고른 순서대로. null 이면 묶는 중이 아니다. */
+    val groupPicks: List<String>? = null,
 ) {
+    /** 지금 사진을 묶는 중인가. */
+    val grouping: Boolean get() = groupPicks != null
+
+    /** ref → 그 사진이 든 묶음 번호(1부터). 썸네일 배지에 쓴다. */
+    val groupOf: Map<String, Int> get() = photoGroups.flatMapIndexed { index, refs -> refs.map { it to index + 1 } }.toMap()
+
     /** 입력창 위 사진판에 걸어 둘 사진들. */
     val tray: List<AttachedPhoto> get() = attachments.drop(trayFrom.coerceIn(0, attachments.size))
 
@@ -64,6 +74,7 @@ data class PhotosPayload(val count: Int, val refs: List<String>, val uris: List<
 object ChatPayloads {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val strings = ListSerializer(String.serializer())
+    private val groupList = ListSerializer(strings)
 
     fun text(value: String): String = json.encodeToString(JsonObject.serializer(), buildJsonObject { put("text", value) })
 
@@ -84,6 +95,15 @@ object ChatPayloads {
         val refs = json.decodeFromJsonElement(strings, obj["refs"]!!)
         val uris = json.decodeFromJsonElement(strings, obj["uris"]!!)
         PhotosPayload(obj["count"]?.jsonPrimitive?.content?.toIntOrNull() ?: refs.size, refs, uris)
+    }.getOrNull()
+
+    fun photoGroups(groups: List<List<String>>): String = json.encodeToString(
+        JsonObject.serializer(),
+        buildJsonObject { put("groups", json.encodeToJsonElement(groupList, groups)) },
+    )
+
+    fun readPhotoGroups(payload: String): List<List<String>>? = runCatching {
+        json.decodeFromJsonElement(groupList, json.parseToJsonElement(payload).jsonObject["groups"]!!)
     }.getOrNull()
 
     fun plan(markdown: String): String = json.encodeToString(JsonObject.serializer(), buildJsonObject { put("markdown", markdown) })

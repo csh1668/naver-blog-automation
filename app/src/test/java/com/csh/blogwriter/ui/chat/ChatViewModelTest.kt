@@ -1026,4 +1026,98 @@ class ChatViewModelTest {
         vm.send("아니요 다시 얘기해요"); advanceUntilIdle()
         assertNull(vm.uiState.value.draftGate)
     }
+
+    // ---- 사진 묶기 ----
+
+    /** 두 장을 골라 묶으면 화면과 대화에 남고, 다시 열어도 그대로다. */
+    @Test
+    fun groupingTwoPhotosIsKeptAndRestored() = runTest {
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.attachPhotos(listOf("a", "b", "c")); advanceUntilIdle()
+
+        vm.startGrouping()
+        vm.toggleGroupPick("img_001")
+        vm.toggleGroupPick("img_003")
+        assertEquals(listOf("img_001", "img_003"), vm.uiState.value.groupPicks)
+
+        vm.finishGrouping(); advanceUntilIdle()
+
+        assertEquals(listOf(listOf("img_001", "img_003")), vm.uiState.value.photoGroups)
+        assertNull(vm.uiState.value.groupPicks)
+        val sessionId = vm.uiState.value.session!!.id
+        assertEquals(listOf(MessageKind.PHOTOS, MessageKind.PHOTO_GROUPS), chatRepo.of(sessionId).map { it.kind })
+
+        val reopened = newViewModel(); reopened.open(sessionId); advanceUntilIdle()
+        assertEquals(listOf(listOf("img_001", "img_003")), reopened.uiState.value.photoGroups)
+    }
+
+    /** 묶음은 2~4장 — 다섯째 사진은 골라지지 않고, 이미 묶인 사진도 다시 골라지지 않는다. */
+    @Test
+    fun aGroupTakesTwoToFourPhotos() = runTest {
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.attachPhotos(listOf("a", "b", "c", "d", "e")); advanceUntilIdle()
+
+        vm.startGrouping()
+        (1..5).forEach { vm.toggleGroupPick("img_%03d".format(it)) }
+        assertEquals(listOf("img_001", "img_002", "img_003", "img_004"), vm.uiState.value.groupPicks)
+        vm.finishGrouping(); advanceUntilIdle()
+
+        // 이미 묶인 사진은 다음 묶기에서 고를 수 없다.
+        vm.startGrouping()
+        vm.toggleGroupPick("img_001")
+        vm.toggleGroupPick("img_005")
+        assertEquals(listOf("img_005"), vm.uiState.value.groupPicks)
+        // 한 장뿐이면 묶음이 생기지 않는다.
+        vm.finishGrouping(); advanceUntilIdle()
+        assertEquals(1, vm.uiState.value.photoGroups.size)
+    }
+
+    /** 묶은 사진을 빼면 묶음에서도 빠지고(번호는 다시 매겨진다), 한 장만 남으면 묶음이 풀린다. */
+    @Test
+    fun removingAPhotoShrinksThenDissolvesTheGroup() = runTest {
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.attachPhotos(listOf("a", "b", "c")); advanceUntilIdle()
+        vm.startGrouping()
+        listOf("img_001", "img_002", "img_003").forEach { vm.toggleGroupPick(it) }
+        vm.finishGrouping(); advanceUntilIdle()
+
+        vm.removePhoto("img_002"); advanceUntilIdle()
+        // a·c 가 남아 img_001·img_002 로 다시 매겨진다.
+        assertEquals(listOf(listOf("img_001", "img_002")), vm.uiState.value.photoGroups)
+
+        vm.removePhoto("img_001"); advanceUntilIdle()
+        assertEquals(emptyList<List<String>>(), vm.uiState.value.photoGroups)
+    }
+
+    /** 묶음을 풀면 화면에서도 대화에서도 사라진다. */
+    @Test
+    fun ungroupingRemovesTheGroup() = runTest {
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.attachPhotos(listOf("a", "b")); advanceUntilIdle()
+        vm.startGrouping()
+        vm.toggleGroupPick("img_001"); vm.toggleGroupPick("img_002")
+        vm.finishGrouping(); advanceUntilIdle()
+
+        vm.ungroup(0); advanceUntilIdle()
+
+        assertEquals(emptyList<List<String>>(), vm.uiState.value.photoGroups)
+        val sessionId = vm.uiState.value.session!!.id
+        val last = chatRepo.of(sessionId).last { it.kind == MessageKind.PHOTO_GROUPS }
+        assertEquals(emptyList<List<String>>(), ChatPayloads.readPhotoGroups(last.payloadJson))
+    }
+
+    /** 초안 턴에는 사용자가 묶어 둔 사진이 함께 실려 나간다. */
+    @Test
+    fun theDraftContextCarriesThePhotoGroups() = runTest {
+        turns += TurnResult.Success(TurnResponse("초안이에요", post = post()), emptyList(), "flash")
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        vm.attachPhotos(listOf("a", "b")); advanceUntilIdle()
+        vm.startGrouping()
+        vm.toggleGroupPick("img_001"); vm.toggleGroupPick("img_002")
+        vm.finishGrouping(); advanceUntilIdle()
+
+        vm.requestDraft(); advanceUntilIdle()
+
+        assertEquals(listOf(listOf("img_001", "img_002")), contexts.single().photoGroups)
+    }
 }
