@@ -1,5 +1,8 @@
 package com.csh.blogwriter.chat
 
+import com.csh.blogwriter.blog.BlogReader
+import com.csh.blogwriter.blog.PostSummary
+import com.csh.blogwriter.blog.PostText
 import com.csh.blogwriter.data.prefs.SettingsStore
 import com.csh.blogwriter.data.repo.MemoryItem
 import com.csh.blogwriter.data.repo.MemoryKind
@@ -13,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -37,15 +41,21 @@ class DefaultToolExecutorTest {
         override suspend fun touch(ids: List<Long>) {}
     }
     private val researchOn = MutableStateFlow(true)
+    private val blogIdFlow = MutableStateFlow<String?>("sampleblog")
     private val settings = object : SettingsStore {
-        override val blogId: Flow<String?> = flowOf(null)
+        override val blogId: Flow<String?> get() = blogIdFlow
         override suspend fun setBlogId(id: String?) {}
         override val researchEnabled: Flow<Boolean> get() = researchOn
+    }
+    private val readCalls = mutableListOf<String>()
+    private val blog = object : BlogReader {
+        override suspend fun listPosts(blogId: String, count: Int) = listOf(PostSummary("1", "첫 글", 0, 1, 2, "요약", 3))
+        override suspend fun readPost(blogId: String, logNo: String) = PostText(logNo, "글 $logNo", listOf("첫 문단", "[사진 2장]"), 2, 0).also { readCalls += logNo }
     }
 
     @Test
     fun searchReturnsHitsWithProgressAndLimits() = runTest {
-        val ex = DefaultToolExecutor(research, memory, settings)
+        val ex = DefaultToolExecutor(research, memory, settings, blog)
         val progress = mutableListOf<String>()
         val r = ex.execute("web_search", buildJsonObject { put("query", "원주 한우") }) { progress += it }
         assertEquals("원주 한우 맛집", r["results"]!!.jsonArray[0].jsonObject["title"]!!.jsonPrimitive.content)
@@ -57,7 +67,7 @@ class DefaultToolExecutorTest {
 
     @Test
     fun rememberStoresAndReportsAndUnknownToolErrors() = runTest {
-        val ex = DefaultToolExecutor(research, memory, settings)
+        val ex = DefaultToolExecutor(research, memory, settings, blog)
         val r = ex.execute("remember", buildJsonObject { put("kind", "PREFERENCE"); put("text", "가격은 정확히 적기") }) {}
         assertEquals(true, r["saved"]!!.jsonPrimitive.content.toBoolean())
         assertEquals(listOf(MemoryKind.PREFERENCE to "가격은 정확히 적기"), added)
@@ -67,7 +77,7 @@ class DefaultToolExecutorTest {
     /** 빈 문장을 기억해 두면 "기억한 것들"에 빈 줄이 쌓이고 프롬프트 자리만 먹는다. */
     @Test
     fun rememberWithBlankTextSavesNothing() = runTest {
-        val ex = DefaultToolExecutor(research, memory, settings)
+        val ex = DefaultToolExecutor(research, memory, settings, blog)
         val progress = mutableListOf<String>()
         val r = ex.execute("remember", buildJsonObject { put("kind", "PREFERENCE"); put("text", "   ") }) { progress += it }
         assertEquals("empty", r["error"]!!.jsonPrimitive.content)
@@ -78,7 +88,7 @@ class DefaultToolExecutorTest {
     @Test
     fun researchDisabledSkipsToolsWithoutProgressOrCounter() = runTest {
         researchOn.value = false
-        val ex = DefaultToolExecutor(research, memory, settings)
+        val ex = DefaultToolExecutor(research, memory, settings, blog)
         val progress = mutableListOf<String>()
         val search = ex.execute("web_search", buildJsonObject { put("query", "원주 한우") }) { progress += it }
         assertEquals("disabled", search["error"]!!.jsonPrimitive.content)
@@ -95,7 +105,7 @@ class DefaultToolExecutorTest {
 
     @Test
     fun openPageOnlyAllowsUrlsFromThisTurnsSearch() = runTest {
-        val ex = DefaultToolExecutor(research, memory, settings)
+        val ex = DefaultToolExecutor(research, memory, settings, blog)
         val notAllowed = ex.execute("open_page", buildJsonObject { put("url", "https://blog.naver.com/x/1") }) {}
         assertEquals("not_allowed", notAllowed["error"]!!.jsonPrimitive.content)
 
@@ -111,7 +121,7 @@ class DefaultToolExecutorTest {
             override suspend fun search(query: String) = listOf(SearchHit("원주 한우 맛집", "https://blog.naver.com/x/1", "요약"))
             override suspend fun openPage(url: String): PageText? { openedUrls += url; return PageText("제목", "본문 텍스트") }
         }
-        val ex = DefaultToolExecutor(capturingResearch, memory, settings)
+        val ex = DefaultToolExecutor(capturingResearch, memory, settings, blog)
         ex.execute("web_search", buildJsonObject { put("query", "원주 한우") }) {}
         val echoed = "https://blog.naver.com/x/1/#review"
         val r = ex.execute("open_page", buildJsonObject { put("url", echoed) }) {}
@@ -126,7 +136,7 @@ class DefaultToolExecutorTest {
             override suspend fun search(query: String): List<SearchHit> = throw CancellationException("cancelled")
             override suspend fun openPage(url: String): PageText? = null
         }
-        val ex = DefaultToolExecutor(cancellingResearch, memory, settings)
+        val ex = DefaultToolExecutor(cancellingResearch, memory, settings, blog)
         var caught = false
         try {
             ex.execute("web_search", buildJsonObject { put("query", "x") }) {}
@@ -134,5 +144,31 @@ class DefaultToolExecutorTest {
             caught = true
         }
         assertTrue(caught)
+    }
+
+    @Test
+    fun adviceToolsReturnPostsAndRespectLimits() = runTest {
+        val ex = DefaultToolExecutor(research, memory, settings, blog)
+        val list = ex.execute("list_my_posts", buildJsonObject {}) {}
+        assertEquals("첫 글", list["posts"]!!.jsonArray[0].jsonObject["title"]!!.jsonPrimitive.content)
+        assertEquals("limit", ex.execute("list_my_posts", buildJsonObject {}) {}["error"]!!.jsonPrimitive.content)
+
+        val progress = mutableListOf<String>()
+        val post = ex.execute("read_my_post", buildJsonObject { put("logNo", "7") }) { progress += it }
+        assertEquals("글 7", post["title"]!!.jsonPrimitive.content)
+        assertTrue(post["text"]!!.jsonPrimitive.content.contains("첫 문단"))
+        assertEquals(2, post["imageCount"]!!.jsonPrimitive.int)
+        assertTrue(progress.any { it.contains("읽고 있어요") })
+        ex.execute("read_my_post", buildJsonObject { put("logNo", "8") }) {}
+        ex.execute("read_my_post", buildJsonObject { put("logNo", "9") }) {}
+        assertEquals("limit", ex.execute("read_my_post", buildJsonObject { put("logNo", "10") }) {}["error"]!!.jsonPrimitive.content)
+        assertEquals(listOf("7", "8", "9"), readCalls)
+    }
+
+    @Test
+    fun adviceToolsWithoutLoginReportError() = runTest {
+        blogIdFlow.value = null   // settings.blogId 의 MutableStateFlow
+        val ex = DefaultToolExecutor(research, memory, settings, blog)
+        assertEquals("not_logged_in", ex.execute("read_my_post", buildJsonObject { put("logNo", "7") }) {}["error"]!!.jsonPrimitive.content)
     }
 }

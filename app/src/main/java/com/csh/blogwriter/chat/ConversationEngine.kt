@@ -5,6 +5,7 @@ import android.util.Log
 import com.csh.blogwriter.data.repo.MemoryRepository
 import com.csh.blogwriter.data.repo.MessageKind
 import com.csh.blogwriter.data.repo.MessageRole
+import com.csh.blogwriter.data.repo.SessionMode
 import com.csh.blogwriter.domain.model.PostContentJson
 import com.csh.blogwriter.llm.ApiKeyStore
 import com.csh.blogwriter.llm.GContent
@@ -75,14 +76,15 @@ class ConversationEngine(
         val rot = rotatorFor(ids, policy.models)
 
         val memItems = memory.activeItems()
-        val system = promptBuilder.system(memItems, ctx.style, policy.targetLength, ctx.draftTurn)
+        val system = promptBuilder.system(memItems, ctx.style, policy.targetLength, ctx.draftTurn, ctx.mode)
+            .let { if (ctx.mode == SessionMode.ADVICE) it + "\n\n" + promptBuilder.postsSection(ctx.blogPosts) else it }
         val contents = buildContents(ctx)
         val attachedRefs = ctx.attachments.map { it.ref }
         val tools = toolsFactory()
 
         var useSchema = true
-        // 초안·수정 턴만 생각을 깊게 시킨다. 질문·계획·피드백은 짧게 — 한도와 응답 시간을 아낀다.
-        val thinkingLevel = if (ctx.draftTurn || ctx.currentPost != null) "high" else "low"
+        // 초안·수정 턴만 생각을 깊게 시킨다. 질문·계획·피드백은 짧게 — 한도와 응답 시간을 아낀다. 조언은 글을 읽고 근거를 대야 해서 초안과 같이 깊게.
+        val thinkingLevel = if (ctx.mode == SessionMode.ADVICE || ctx.draftTurn || ctx.currentPost != null) "high" else "low"
         var useThinking = true
         // 이번 "턴" 전체에 한 번만 주는 무료 재시도. pick 마다 주면 시도 상한이 흐려진다.
         var transientRetried = false
@@ -111,7 +113,7 @@ class ConversationEngine(
                 Log.d(TAG, "attempt $attempts/$maxAttempts model=${pick.model} key=…${pick.keyId.takeLast(4)} schema=$useSchema")
                 val result = runWithTools(
                     secret, pick.model, system, contents, attachedRefs, ctx.photoGroups, policy, useSchema,
-                    if (useThinking) thinkingLevel else null, tools, listener,
+                    if (useThinking) thinkingLevel else null, tools, listener, ctx.mode,
                 )
                 Log.d(TAG, "attempt $attempts ok model=${pick.model}")
                 rot.report(pick, KeyRotator.Outcome.SUCCESS)
@@ -179,6 +181,7 @@ class ConversationEngine(
         thinkingLevel: String?,
         tools: ToolExecutor,
         listener: TurnListener,
+        mode: SessionMode,
     ): TurnResult.Success {
         val contents = base.toMutableList()
         var temperature = policy.temperature
@@ -189,13 +192,13 @@ class ConversationEngine(
             val req = GRequest(
                 contents = contents,
                 systemInstruction = GSystemInstruction(listOf(GPart(text = if (useSchema) system else system + JSON_ONLY_HINT))),
-                tools = listOf(GTool(TurnSchemas.functionDeclarations())),
+                tools = listOf(GTool(TurnSchemas.functionDeclarations(mode))),
                 toolConfig = GToolConfig(GFunctionCallingConfig("AUTO")),
                 generationConfig = GGenerationConfig(
                     temperature = temperature, // 3.x 모델은 thinking 토큰까지 출력 예산에서 쓴다 — 1,800자 초안 + JSON 이 8192 에서 잘리지 않도록 넉넉히.
                     maxOutputTokens = 16384,
                     responseMimeType = if (useSchema) "application/json" else null,
-                    responseJsonSchema = if (useSchema) TurnSchemas.turnResponseJsonSchema() else null,
+                    responseJsonSchema = if (useSchema) TurnSchemas.turnResponseJsonSchema(mode) else null,
                     thinkingConfig = thinkingLevel?.let { GThinkingConfig(it) },
                 ),
             )
@@ -221,7 +224,13 @@ class ConversationEngine(
                 if (++toolRounds > MAX_TOOL_ROUNDS) throw BadResponse("도구 호출이 너무 많습니다")
                 contents += GContent("model", callParts)
                 contents += GContent("user", calls.map { call ->
-                    GPart(functionResponse = GFunctionResponse(call.name, runTool(tools, call, listener)))
+                    val result = runTool(tools, call, listener)
+                    if (call.name == "read_my_post" && result["error"] == null) {
+                        result["title"]?.jsonPrimitive?.content?.let { title ->
+                            listener.onPostRead(result["logNo"]?.jsonPrimitive?.content ?: call.args["logNo"]?.jsonPrimitive?.content.orEmpty(), title)
+                        }
+                    }
+                    GPart(functionResponse = GFunctionResponse(call.name, result))
                 })
                 continue
             }
@@ -250,6 +259,7 @@ class ConversationEngine(
 
     /** 대화 기록 → contents. 사진은 첫 user 파트에 inlineData 로, ref 라벨을 텍스트로 함께 붙인다. 현재 계획·post 가 있으면 마지막에 전문을 붙인다. */
     private fun buildContents(ctx: ChatContext): List<GContent> {
+        if (ctx.mode == SessionMode.ADVICE) return adviceContents(ctx)
         val out = mutableListOf<GContent>()
         if (ctx.attachments.isNotEmpty()) {
             val parts = mutableListOf(GPart(text = "첨부 사진 (ref 순서대로):"))
@@ -288,6 +298,13 @@ class ConversationEngine(
             out += GContent("user", listOf(GPart(text = ask)))
         }
         return out
+    }
+
+    /** 조언 세션: 사진·계획·초안·사실 확인 지시 없이 말 기록만 넘긴다. */
+    private fun adviceContents(ctx: ChatContext): List<GContent> = ctx.history.mapNotNull { m ->
+        if (m.role == MessageRole.SYSTEM || m.kind != MessageKind.TEXT) return@mapNotNull null
+        val text = runCatching { json.parseToJsonElement(m.payloadJson).jsonObject["text"]!!.jsonPrimitive.content }.getOrDefault(m.payloadJson)
+        GContent(if (m.role == MessageRole.USER) "user" else "model", listOf(GPart(text = text)))
     }
 }
 

@@ -1,11 +1,13 @@
 package com.csh.blogwriter.chat
 
+import com.csh.blogwriter.blog.PostSummary
 import com.csh.blogwriter.data.repo.ChatMessage
 import com.csh.blogwriter.data.repo.MemoryItem
 import com.csh.blogwriter.data.repo.MemoryKind
 import com.csh.blogwriter.data.repo.MemoryRepository
 import com.csh.blogwriter.data.repo.MessageKind
 import com.csh.blogwriter.data.repo.MessageRole
+import com.csh.blogwriter.data.repo.SessionMode
 import com.csh.blogwriter.domain.model.PostContent
 import com.csh.blogwriter.llm.ApiKey
 import com.csh.blogwriter.llm.ApiKeyStore
@@ -20,6 +22,9 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -82,10 +87,14 @@ class ConversationEngineTest {
 
     @Before fun setUp() {
         server.start()
+        engine = engine()
+    }
+
+    private fun engine(toolsFactory: () -> ToolExecutor = { toolOverride ?: tools }): ConversationEngine {
         val client = GeminiClient(OkHttpClient(), server.url("/").toString().trimEnd('/'))
-        engine = ConversationEngine(
+        return ConversationEngine(
             client, keyStore, { k, m -> KeyRotator(k, m) { now } }, { ModelPolicy(listOf("flash", "lite")) },
-            PromptBuilder(promptStore), memory, { toolOverride ?: tools },
+            PromptBuilder(promptStore), memory, toolsFactory,
         ) { now }
     }
     @After fun tearDown() = server.shutdown()
@@ -410,5 +419,48 @@ class ConversationEngineTest {
         assertTrue(body.contains("사용자가 묶어 둔 사진: [img_001, img_002]"))
         val group = r.response.post!!.blocks.single() as com.csh.blogwriter.domain.model.Block.ImageGroup
         assertEquals(listOf("img_001", "img_002"), group.refs)
+    }
+
+    // ---- 조언 모드 ----
+
+    @Test
+    fun adviceTurnUsesAdviceSchemaToolsAndReportsPostRead() = runTest {
+        // 1라운드: read_my_post 호출, 2라운드: {say}
+        val callJson = """{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"read_my_post","args":{"logNo":"100000000001"}},"thoughtSignature":"sig-x"}]}}]}"""
+        server.enqueue(sse(callJson))
+        server.enqueue(textResponse("""{"say":"잘한 점: …"}"""))
+        val reads = mutableListOf<Pair<String, String>>()
+        val listener = object : TurnListener {
+            override fun onToolStatus(text: String) {}
+            override fun onPartialSay(text: String) {}
+            override fun onPostRead(logNo: String, title: String) { reads += logNo to title }
+        }
+        val advicedTools = object : ToolExecutor {
+            override suspend fun execute(name: String, args: JsonObject, onProgress: (String) -> Unit) =
+                buildJsonObject { put("logNo", "100000000001"); put("title", "원주 카페 늘봄"); put("text", "본문"); put("imageCount", 3); put("videoCount", 0) }
+        }
+        val engine = engine(toolsFactory = { advicedTools })
+        val ctx = ChatContext(
+            history = listOf(ChatMessage(1, "s", 0, MessageRole.USER, MessageKind.TEXT, "{\"text\":\"최근 글 봐 줘\"}", 0)),
+            attachments = emptyList(), style = null, draftTurn = false, currentPost = null,
+            mode = SessionMode.ADVICE, blogPosts = listOf(PostSummary("100000000001", "원주 카페 늘봄", 0, 1, 2, "", 3)),
+        )
+
+        val result = engine.runTurn(ctx, listener) as TurnResult.Success
+        assertEquals("잘한 점: …", result.response.say)
+        assertEquals(listOf("100000000001" to "원주 카페 늘봄"), reads)
+
+        val first = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        val system = first["systemInstruction"]!!.jsonObject["parts"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content
+        assertTrue(system.contains("[ADVICE_ROLE]")); assertFalse(system.contains("[STRUCTURE]"))
+        assertTrue(system.contains("[최근 글 목록]")); assertTrue(system.contains("원주 카페 늘봄"))
+        val toolNames = first["tools"]!!.jsonArray[0].jsonObject["functionDeclarations"]!!.jsonArray.map { it.jsonObject["name"]!!.jsonPrimitive.content }
+        assertEquals(listOf("list_my_posts", "read_my_post"), toolNames)
+        val required = first["generationConfig"]!!.jsonObject["responseJsonSchema"]!!.jsonObject["required"]!!.jsonArray.map { it.jsonPrimitive.content }
+        assertEquals(listOf("say"), required)
+        assertEquals("high", first["generationConfig"]!!.jsonObject["thinkingConfig"]!!.jsonObject["thinkingLevel"]!!.jsonPrimitive.content)
+        // 조언 턴에는 사실 확인·계획 지시가 붙지 않는다.
+        val userTexts = first["contents"]!!.jsonArray.flatMap { it.jsonObject["parts"]!!.jsonArray }.mapNotNull { it.jsonObject["text"]?.jsonPrimitive?.content }
+        assertFalse(userTexts.any { it.contains("plan 을") })
     }
 }

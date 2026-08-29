@@ -2,6 +2,7 @@ package com.csh.blogwriter.chat
 
 import android.util.Log
 
+import com.csh.blogwriter.blog.BlogReader
 import com.csh.blogwriter.data.prefs.SettingsStore
 import com.csh.blogwriter.data.repo.MemoryKind
 import com.csh.blogwriter.data.repo.MemoryRepository
@@ -20,9 +21,10 @@ class DefaultToolExecutor @Inject constructor(
     private val research: ResearchTool,
     private val memory: MemoryRepository,
     private val settings: SettingsStore,
+    private val blog: BlogReader,
 ) : ToolExecutor {
     private val counts = HashMap<String, Int>()
-    private val limits = mapOf("web_search" to 2, "open_page" to 2, "remember" to 2)
+    private val limits = mapOf("web_search" to 2, "open_page" to 2, "remember" to 2, "list_my_posts" to 1, "read_my_post" to 3)
 
     /** 이번 턴 web_search 결과로 나온 url만 open_page 로 열 수 있다. */
     private val allowedUrls = mutableSetOf<String>()
@@ -69,6 +71,25 @@ class DefaultToolExecutor @Inject constructor(
                         val kind = runCatching { MemoryKind.valueOf(args["kind"]!!.jsonPrimitive.content) }.getOrDefault(MemoryKind.PREFERENCE)
                         val item = memory.add(kind, text, "chat")
                         buildJsonObject { put("saved", true); put("id", item.id) }
+                    }
+                }
+                "list_my_posts" -> {
+                    val blogId = settings.blogIdOnce() ?: return buildJsonObject { put("error", "not_logged_in") }
+                    onProgress("최근 글 목록을 읽고 있어요…")
+                    val posts = blog.listPosts(blogId) ?: return buildJsonObject { put("error", "글 목록을 읽지 못했어요") }
+                    buildJsonObject { put("posts", buildJsonArray { posts.forEach { p -> add(buildJsonObject {
+                        put("logNo", p.logNo); put("title", p.title); put("addedAt", p.addedAt); put("comments", p.comments); put("likes", p.likes); put("photoCount", p.photoCount); put("brief", p.brief.take(160))
+                    }) } }) }
+                }
+                "read_my_post" -> {
+                    val blogId = settings.blogIdOnce() ?: return buildJsonObject { put("error", "not_logged_in") }
+                    val logNo = args["logNo"]?.jsonPrimitive?.content?.trim().orEmpty()
+                    if (logNo.isEmpty()) buildJsonObject { put("error", "logNo 없음") }
+                    else {
+                        onProgress("글을 읽고 있어요…")
+                        val post = blog.readPost(blogId, logNo)
+                        if (post == null) buildJsonObject { put("error", "글을 읽지 못했어요") }
+                        else buildJsonObject { put("logNo", post.logNo); put("title", post.title); put("text", post.text()); put("imageCount", post.imageCount); put("videoCount", post.videoCount) }
                     }
                 }
                 else -> buildJsonObject { put("error", "unknown tool") }

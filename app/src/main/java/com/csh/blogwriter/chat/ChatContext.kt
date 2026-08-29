@@ -1,6 +1,8 @@
 package com.csh.blogwriter.chat
 
+import com.csh.blogwriter.blog.PostSummary
 import com.csh.blogwriter.data.repo.ChatMessage
+import com.csh.blogwriter.data.repo.SessionMode
 import com.csh.blogwriter.domain.model.PostContent
 
 data class Attachment(val ref: String, val jpegBase64: String, val mimeType: String = "image/jpeg")
@@ -18,6 +20,9 @@ data class ChatContext(
     /** 계획을 내지 않고 되물은 횟수. [maxQuestionRounds] 에 닿으면 더 묻지 말고 계획을 내라고 한다. */
     val questionRounds: Int = 0,
     val maxQuestionRounds: Int = 4,
+    val mode: SessionMode = SessionMode.WRITE,
+    /** 조언 세션이 세션 시작 때 읽어 둔 최근 글 목록. null = 읽지 못함. */
+    val blogPosts: List<PostSummary>? = null,
 )
 
 sealed interface TurnResult {
@@ -36,6 +41,8 @@ interface TurnListener {
      * 시작될 때마다 보내는 빈 문자열("")은 "지금까지 보여 준 것을 지우라"는 뜻이다 — 값은 줄어들 수 있다.
      */
     fun onPartialSay(text: String)
+    /** 조언 도구가 글 본문을 읽었을 때 — 오른쪽 패널을 그 글로 연다. */
+    fun onPostRead(logNo: String, title: String) {}
 }
 
 interface TurnRunner {
