@@ -523,15 +523,13 @@ private fun PanelHost(
 @Composable
 private fun LoginNudge(onLogin: () -> Unit) {
     val c = AppTheme.colors
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    // 버튼이 가로를 다 차지하므로 문장 → 버튼 순으로 세로 배치한다(가로로 놓으면 문장이 한 글자씩 세로로 밀린다).
+    Column(Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
         Text(
             "네이버에 로그인되어 있지 않아요. 글을 올리려면 로그인이 필요해요.",
-            style = AppTheme.typography.body2, color = c.textSecondary, modifier = Modifier.weight(1f),
+            style = AppTheme.typography.body2, color = c.textSecondary, modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.width(AppSpacing.sm))
+        Spacer(Modifier.height(AppSpacing.sm))
         WeakButton("로그인하기", onClick = onLogin)
     }
 }
