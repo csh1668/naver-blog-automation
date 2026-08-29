@@ -1,7 +1,9 @@
 package com.csh.blogwriter.chat
 
+import com.csh.blogwriter.blog.PostSummary
 import com.csh.blogwriter.data.repo.MemoryItem
 import com.csh.blogwriter.data.repo.MemoryKind
+import com.csh.blogwriter.data.repo.SessionMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
@@ -16,6 +18,7 @@ class PromptBuilderTest {
         PromptSection.STYLE to "스타일: {{style}}", PromptSection.MEMORY to "기억:\n{{memory}}",
         PromptSection.STRUCTURE to "구조 문안 길이 {{minLen}}~{{maxLen}}자", PromptSection.CONVERSATION to "대화 문안",
         PromptSection.OUTPUT to "출력 문안", PromptSection.SELFCHECK to "점검 문안",
+        PromptSection.ADVICE_ROLE to "조언 역할", PromptSection.ADVICE_GUARDS to "조언 규칙", PromptSection.ADVICE_OUTPUT to "조언 출력",
     )
     private val store = object : PromptStore {
         override suspend fun text(section: PromptSection) = texts.getValue(section)
@@ -52,5 +55,33 @@ class PromptBuilderTest {
         assertTrue(s.contains("점검 문안"))
         assertEquals(40, Regex("- PREFERENCE: 항목").findAll(s).count())
         assertTrue(s.contains("스타일: (아직 없음)"))
+    }
+
+    @Test
+    fun adviceModeAssemblesAdviceSectionsOnly() = runTest {
+        val s = PromptBuilder(store).system(memory = listOf(mem(1)), style = "존댓말", targetLength = 900..1400, draftTurn = false, mode = SessionMode.ADVICE)
+        val idx = listOf("조언 역할", "스타일: 존댓말", "- PREFERENCE: 항목1", "조언 규칙", "조언 출력").map { s.indexOf(it) }
+        assertTrue(idx.all { it >= 0 })
+        assertEquals(idx, idx.sorted())
+        listOf("역할 문안", "독자 문안", "구조 문안", "대화 문안", "출력 문안", "점검 문안").forEach { assertFalse(it, s.contains(it)) }
+    }
+
+    @Test
+    fun writeModeDoesNotIncludeAdviceSections() = runTest {
+        val s = PromptBuilder(store).system(memory = emptyList(), style = null, targetLength = 900..1400, draftTurn = false)
+        assertFalse(s.contains("조언 역할"))
+    }
+
+    @Test
+    fun postsSectionRendersTableOrFallback() {
+        val b = PromptBuilder(store)
+        val posts = listOf(PostSummary("100000000001", "원주 카페 늘봄", 1_787_989_202_986L, 2, 4, "쑥라떼가 달지 않았어요", 8))
+        val table = b.postsSection(posts)
+        assertTrue(table.startsWith("[최근 글 목록]"))
+        assertTrue(table.contains("100000000001 | 원주 카페 늘봄 | 2026-08-29 | 댓글 2 | 공감 4 | 사진 8"))
+        assertTrue(table.contains("쑥라떼가 달지 않았어요"))
+        val none = b.postsSection(null)
+        assertTrue(none.contains("목록 없음"))
+        assertTrue(none.contains("read_my_post"))
     }
 }
