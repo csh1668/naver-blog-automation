@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.csh.blogwriter.chat.PromptGroup
 import com.csh.blogwriter.chat.PromptSection
 import com.csh.blogwriter.ui.components.AppTextField
 import com.csh.blogwriter.ui.components.AppTopBar
@@ -44,15 +45,27 @@ fun PromptsScreen(onBack: () -> Unit, viewModel: PromptsViewModel = hiltViewMode
             "여기 내용이 글을 만드는 규칙이에요. 바꾼 뒤 저장하면 다음 대화부터 적용돼요.",
             style = AppTheme.typography.body2, color = AppTheme.colors.textSecondary,
         )
+        Text(
+            "제목에 * 가 붙은 섹션은 직접 고친 것이라, 앱을 업데이트해도 새 기본값이 적용되지 않아요. 새 기본값을 쓰려면 되돌려 주세요.",
+            style = AppTheme.typography.body2, color = AppTheme.colors.textSecondary,
+        )
         Spacer(Modifier.height(AppSpacing.xxl))
         LazyColumn {
-            items(sections, key = { it.section }) { state ->
-                PromptCard(
-                    state = state,
-                    onSave = { text -> viewModel.save(state.section, text) },
-                    onResetRequest = { resetTarget = state.section },
-                )
-                Spacer(Modifier.height(AppSpacing.lg))
+            PromptGroup.entries.forEach { group ->
+                val inGroup = sections.filter { it.section.group == group }
+                if (inGroup.isEmpty()) return@forEach
+                item(key = "header-${group.name}") {
+                    Text(group.title, style = AppTheme.typography.title2, color = AppTheme.colors.textPrimary, modifier = Modifier.padding(bottom = AppSpacing.md))
+                }
+                items(inGroup, key = { it.section }) { state ->
+                    PromptCard(
+                        state = state,
+                        onSave = { text -> viewModel.save(state.section, text) },
+                        onResetRequest = { resetTarget = state.section },
+                    )
+                    Spacer(Modifier.height(AppSpacing.lg))
+                }
+                item(key = "gap-${group.name}") { Spacer(Modifier.height(AppSpacing.xl)) }
             }
         }
     }
@@ -82,7 +95,7 @@ private fun PromptCard(state: PromptSectionState, onSave: (String) -> Unit, onRe
             .padding(AppSpacing.lg),
     ) {
         Row {
-            Text(state.section.title, style = AppTheme.typography.title3, color = AppTheme.colors.textPrimary, modifier = Modifier.weight(1f))
+            Text(if (state.overridden) "${state.section.title} *" else state.section.title, style = AppTheme.typography.title3, color = AppTheme.colors.textPrimary, modifier = Modifier.weight(1f))
             if (state.overridden) OverriddenBadge()
         }
         Spacer(Modifier.height(AppSpacing.md))
