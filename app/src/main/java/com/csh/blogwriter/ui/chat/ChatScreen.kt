@@ -77,10 +77,12 @@ import androidx.lifecycle.defaultViewModelProviderFactory
 import androidx.lifecycle.viewmodel.MutableCreationExtras
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.csh.blogwriter.blog.postUrl
 import com.csh.blogwriter.chat.AttachedPhoto
 import com.csh.blogwriter.data.repo.ChatMessage
 import com.csh.blogwriter.data.repo.MessageKind
 import com.csh.blogwriter.data.repo.MessageRole
+import com.csh.blogwriter.data.repo.SessionMode
 import com.csh.blogwriter.domain.publish.PublishState
 import com.csh.blogwriter.ui.chat.components.Composer
 import com.csh.blogwriter.ui.chat.components.MessageBubble
@@ -134,11 +136,13 @@ fun ChatScreen(
         if (ui.panelOpen) panelMounted = true
         if (ui.panelJobId == null) { panelMounted = false; panelStatus = null }
     }
+    // 조언 대화의 오른쪽 자리는 모델이 읽은 글이 차지한다.
+    val advicePostUrl = ui.focusedPost?.let { p -> ui.blogId?.let { id -> postUrl(id, p.logNo) } }?.takeIf { ui.mode == SessionMode.ADVICE }
     // 오른쪽 자리는 초안이 있으면 에디터가, 아직 계획뿐이면 계획이 차지한다.
-    val showEditor = panelMounted && ui.panelJobId != null
+    val showEditor = ui.mode == SessionMode.WRITE && panelMounted && ui.panelJobId != null
     // 발행이 끝난 대화는 계획 대신 올라간 글을 보여 준다.
-    val publishedUrl = ui.session?.takeIf { it.status == SessionStatus.PUBLISHED }?.publishedUrl
-    val planMarkdown = if (showEditor || publishedUrl != null) null else ui.plan
+    val publishedUrl = ui.session?.takeIf { it.mode == SessionMode.WRITE && it.status == SessionStatus.PUBLISHED }?.publishedUrl
+    val planMarkdown = if (ui.mode == SessionMode.WRITE && !showEditor && publishedUrl == null) ui.plan else null
 
     // 입력창에 커서가 있는 동안에는 채팅 쪽을 넓혀 준다 — 오른쪽 패널이 말할 자리를 덜 뺏도록.
     var composerFocused by remember { mutableStateOf(false) }
@@ -150,7 +154,7 @@ fun ChatScreen(
         val chatNeedsRoom = composerFocused || !ui.listCollapsed
         // 에디터는 최소 PANEL_MIN.
         val targetPanelWidth = maxOf(PANEL_MIN, screenWidth * (if (chatNeedsRoom) 0.5f else 0.7f))
-        val panelMountedNow = showEditor || planMarkdown != null || publishedUrl != null
+        val panelMountedNow = showEditor || planMarkdown != null || publishedUrl != null || advicePostUrl != null
         // 안쪽(내용)과 바깥쪽(보이는 폭)을 같은 스펙으로 따로 움직인다 —
         // 접을 때는 바깥만 0 으로 줄어 WebView 는 제 폭 그대로 살아 있는다.
         val panelWidth by animateDpAsState(targetPanelWidth, tween(200), label = "panelContentWidth")
@@ -190,7 +194,8 @@ fun ChatScreen(
                     // 접을 때는 폭만 0 으로 줄인다 — 컴포지션에 남아 있어야 WebView 와 편집 내용이 살아남는다.
                     Box(Modifier.width(shownPanelWidth).fillMaxHeight().clipToBounds().clearFocusOnPress()) {
                         Box(Modifier.requiredWidth(panelWidth).fillMaxHeight()) {
-                            if (publishedUrl != null) PublishedPostPanel(publishedUrl)
+                            if (advicePostUrl != null) PublishedPostPanel(advicePostUrl, title = ui.focusedPost?.title ?: "글 보기")
+                            else if (publishedUrl != null) PublishedPostPanel(publishedUrl)
                             else if (planMarkdown != null) PlanPanel(planMarkdown, onSave = viewModel::savePlanEdit)
                             else PanelHost(ui.panelJobId, viewModel, onSessionExpired, onFailed, editorScalePercent) { panelStatus = it }
                         }
@@ -241,7 +246,8 @@ fun ChatScreen(
                             Text("채팅으로", style = AppTheme.typography.body1, color = AppTheme.colors.textPrimary)
                         }
                         Box(Modifier.weight(1f)) {
-                            if (publishedUrl != null) PublishedPostPanel(publishedUrl)
+                            if (advicePostUrl != null) PublishedPostPanel(advicePostUrl, title = ui.focusedPost?.title ?: "글 보기")
+                            else if (publishedUrl != null) PublishedPostPanel(publishedUrl)
                             else if (planMarkdown != null) PlanPanel(planMarkdown, onSave = viewModel::savePlanEdit)
                             else PanelHost(ui.panelJobId, viewModel, onSessionExpired, onFailed, 100) { panelStatus = it }
                         }
@@ -298,7 +304,11 @@ private fun ChatPane(
             )
             TextButton(onClick = onOpenMemory) { Text("기억한 것들", style = AppTheme.typography.body2, color = c.fillBrand) }
             if (ui.hasPanel) {
-                val what = if (ui.panelJobId != null) "초안" else "계획"
+                val what = when {
+                    ui.mode == SessionMode.ADVICE -> "글"
+                    ui.panelJobId != null -> "초안"
+                    else -> "계획"
+                }
                 IconButton(onClick = viewModel::togglePanel, modifier = Modifier.size(AppSpacing.touchTarget)) {
                     Icon(
                         Icons.AutoMirrored.Rounded.Article,
@@ -341,10 +351,17 @@ private fun ChatPane(
                 onSend = { justSent = true; viewModel.send(draft); draft = "" },
                 onAttach = viewModel::attachPhotos,
                 enabled = ui.hasKey && !ui.thinking,
-                placeholder = if (ui.thinking) "글을 구상하고 있어요" else "오늘 있었던 일을 들려주세요",
+                placeholder = when {
+                    ui.thinking -> if (ui.mode == SessionMode.ADVICE) "글을 읽고 있어요" else "글을 구상하고 있어요"
+                    ui.mode == SessionMode.ADVICE -> "어떤 글을 봐 드릴까요? 예: 최근 글 봐 줘"
+                    else -> "오늘 있었던 일을 들려주세요"
+                },
+                showAttach = ui.mode == SessionMode.WRITE,
                 canAttach = ui.panelJobId == null,
                 hero = hero,
                 onFocusChanged = onComposerFocusChanged,
+                mode = ui.mode,
+                onModeChange = if (ui.session == null) viewModel::setMode else null,
             )
         }
         // 아직 말이 오가지 않은 새 글(사진만 붙여 둔 것도 포함) — 목록 대신 큰 제목과 가운데 입력창을 보여 준다.
@@ -356,15 +373,15 @@ private fun ChatPane(
             ) {
                 Column(Modifier.widthIn(max = AppSpacing.contentMaxWidth).padding(vertical = AppSpacing.lg)) {
                     Text(
-                        "오늘은 어떤 이야기를 올릴까요?",
+                        if (ui.mode == SessionMode.ADVICE) "블로그를 함께 살펴볼까요?" else "오늘은 어떤 이야기를 올릴까요?",
                         style = AppTheme.typography.display, color = c.textPrimary,
                         textAlign = TextAlign.Center, maxLines = 1, softWrap = false,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg),
                     )
                     Spacer(Modifier.height(AppSpacing.section))
-                    AttachmentTray(ui, viewModel)
+                    if (ui.mode == SessionMode.WRITE) AttachmentTray(ui, viewModel)
                     composer(true)
-                    if (!ui.loggedIn) LoginNudge(onLogin)
+                    if (!ui.loggedIn) LoginNudge(onLogin, text = if (ui.mode == SessionMode.ADVICE) ChatViewModel.ADVICE_NEEDS_LOGIN else NOT_LOGGED_IN)
                 }
             }
         } else {
@@ -379,10 +396,10 @@ private fun ChatPane(
             }
             ui.draftGate?.let { gate -> DraftGateCard(gate, viewModel) }
             QuickReplyChips(ui.quickReplies) { justSent = true; viewModel.sendQuickReply(it) }
-            AttachmentTray(ui, viewModel)
+            if (ui.mode == SessionMode.WRITE) AttachmentTray(ui, viewModel)
             // 계획이 있고 아직 초안이 없는 동안에는 초안 버튼이 입력창 위에 늘 걸려 있다.
             val published = ui.session?.status == SessionStatus.PUBLISHED
-            if (ui.plan != null && ui.panelJobId == null && !ui.thinking && ui.draftGate == null && !published) {
+            if (ui.mode == SessionMode.WRITE && ui.plan != null && ui.panelJobId == null && !ui.thinking && ui.draftGate == null && !published) {
                 Box(Modifier.padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
                     BottomCta(
                         ChatViewModel.DRAFT_CHIP,
@@ -392,7 +409,7 @@ private fun ChatPane(
                 }
             }
             // 초안이 나온 뒤 붙인 사진은 에디터에 올라가 있지 않아 다음 수정본 주입이 깨진다 — 버튼을 막고 이유를 알려 준다.
-            if (ui.panelJobId != null) {
+            if (ui.mode == SessionMode.WRITE && ui.panelJobId != null) {
                 Text(
                     ChatViewModel.NO_PHOTO_AFTER_DRAFT,
                     style = AppTheme.typography.caption,
@@ -401,7 +418,7 @@ private fun ChatPane(
                 )
             }
             composer(false)
-            if (!ui.loggedIn) LoginNudge(onLogin)
+            if (!ui.loggedIn) LoginNudge(onLogin, text = if (ui.mode == SessionMode.ADVICE) ChatViewModel.ADVICE_NEEDS_LOGIN else NOT_LOGGED_IN)
         }
     }
 }
@@ -606,14 +623,17 @@ private fun PanelHost(
     )
 }
 
+/** 글쓰기에서 로그인이 풀렸을 때의 안내 문구. 조언은 [ChatViewModel.ADVICE_NEEDS_LOGIN] 을 쓴다. */
+private const val NOT_LOGGED_IN = "네이버에 로그인되어 있지 않아요. 글을 올리려면 로그인이 필요해요."
+
 /** 네이버에 로그인돼 있지 않을 때 입력창 아래에 붙는 안내. 로그인이 풀려도 여기서 바로 다시 할 수 있다. */
 @Composable
-private fun LoginNudge(onLogin: () -> Unit) {
+private fun LoginNudge(onLogin: () -> Unit, text: String = NOT_LOGGED_IN) {
     val c = AppTheme.colors
     // 버튼이 가로를 다 차지하므로 문장 → 버튼 순으로 세로 배치한다(가로로 놓으면 문장이 한 글자씩 세로로 밀린다).
     Column(Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
         Text(
-            "네이버에 로그인되어 있지 않아요. 글을 올리려면 로그인이 필요해요.",
+            text,
             style = AppTheme.typography.body2, color = c.textSecondary, modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(AppSpacing.sm))

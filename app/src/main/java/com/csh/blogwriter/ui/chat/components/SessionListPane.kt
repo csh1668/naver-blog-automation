@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,6 +40,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.csh.blogwriter.data.repo.ChatSession
+import com.csh.blogwriter.data.repo.SessionMode
 import com.csh.blogwriter.data.repo.SessionStatus
 import com.csh.blogwriter.ui.components.AppTextField
 import com.csh.blogwriter.ui.components.ConfirmSheet
@@ -150,14 +152,26 @@ private fun SessionRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f).padding(vertical = AppSpacing.md)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // 조언 대화는 제목 앞에 칩을 달아 목록에서 바로 구분된다.
+                if (session.mode == SessionMode.ADVICE) {
+                    Text(
+                        "조언",
+                        style = AppTheme.typography.caption, color = c.fillBrand,
+                        modifier = Modifier.clip(RoundedCornerShape(AppSpacing.radiusControl)).background(c.fillBrandWeak)
+                            .padding(horizontal = AppSpacing.sm, vertical = 2.dp),
+                    )
+                    Spacer(Modifier.width(AppSpacing.xs))
+                }
+                Text(
+                    session.title ?: "새 글",
+                    style = AppTheme.typography.body1,
+                    color = if (selected) c.fillBrand else c.textPrimary,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
             Text(
-                session.title ?: "새 글",
-                style = AppTheme.typography.body1,
-                color = if (selected) c.fillBrand else c.textPrimary,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                "${relativeTime(session.updatedAt)} · ${statusLabel(session.status)}",
+                "${relativeTime(session.updatedAt)} · ${if (session.mode == SessionMode.ADVICE) "조언" else statusLabel(session.status)}",
                 style = AppTheme.typography.caption, color = c.textSecondary, maxLines = 1,
             )
         }

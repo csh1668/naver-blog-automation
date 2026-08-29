@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.viewinterop.AndroidView
 import com.csh.blogwriter.ui.theme.AppSpacing
 import com.csh.blogwriter.ui.theme.AppTheme
@@ -30,7 +31,7 @@ import com.csh.blogwriter.ui.theme.AppTheme
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun PublishedPostPanel(url: String, modifier: Modifier = Modifier) {
+fun PublishedPostPanel(url: String, title: String = "발행한 글", modifier: Modifier = Modifier) {
     val c = AppTheme.colors
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
@@ -49,7 +50,7 @@ fun PublishedPostPanel(url: String, modifier: Modifier = Modifier) {
             Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = AppSpacing.xl, vertical = AppSpacing.sm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("발행한 글", style = AppTheme.typography.title3, color = c.textPrimary, modifier = Modifier.weight(1f))
+            Text(title, style = AppTheme.typography.title3, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             TextButton(onClick = { uriHandler.openUri(url) }) {
                 Text("브라우저에서 열기", style = AppTheme.typography.body2, color = c.fillBrand)
             }
