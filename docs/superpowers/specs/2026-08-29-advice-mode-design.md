@@ -22,7 +22,7 @@
 - 메시지 kind 추가(둘 다 모델 히스토리에는 싣지 않고 화면·복원에만 쓴다 — `PHOTO_GROUPS`와 같은 취급):
   - `BLOG_POSTS` — 앱이 읽은 최근 글 목록 스냅샷 `{posts:[{logNo,title,date,comments,likes}]}`. 화면엔 얇은 한 줄 "최근 글 N개를 읽었어요".
   - `POST_VIEW` — 모델이 본문을 읽은 글 `{logNo,title}`. 화면엔 "'제목' 글을 읽었어요". 재열기 때 마지막 `POST_VIEW`로 오른쪽 패널을 복원.
-- 읽기 빈도 원칙(약관 리스크 = 계정 제한): **사용자 메시지 1회당** 목록 1회, 본문 최대 3편. 같은 글은 세션 안에서 메모리 캐시(`Map<logNo, PostText>`)로 다시 읽지 않는다. 백그라운드 갱신 없음.
+- 읽기 빈도 원칙(약관 리스크 = 계정 제한): **사용자 메시지 1회당** 목록 1회, 본문 최대 3편. 같은 글은 메모리 캐시(최근 20편, **10분 TTL** — 고친 글을 다시 볼 수 있게)로 다시 읽지 않는다. 백그라운드 갱신 없음.
 
 ## 4. 블로그 읽기 — `blog/BlogReader`
 
@@ -59,11 +59,11 @@ interface BlogReader {
   - `list_my_posts()` — 최근 글 30개. 턴당 1회.
   - `read_my_post(logNo)` — 본문·사진 수·날짜. 턴당 3회, 같은 logNo는 캐시.
   - 글쓰기 도구(`web_search`, `open_page`, `remember`)는 조언 모드에 주지 않는다.
-- `DefaultToolExecutor`는 모드별 한도 표를 가지며, `read_my_post` 성공 시 `TurnListener.onPostRead(logNo, title)`을 부른다(오른쪽 패널·`POST_VIEW` 저장용).
+- `DefaultToolExecutor`는 한도 표에 조언 도구를 더한다(모델이 보는 도구 목록은 `TurnSchemas.functionDeclarations(mode)`가 정한다). `read_my_post` 성공 시 엔진이 `TurnListener.onPostRead(logNo, title)`을 부른다(오른쪽 패널·`POST_VIEW` 저장용). 리스너는 턴마다 자기 세션 id를 안고 만들어져 늦은 콜백이 다른 대화에 붙지 않는다.
 - thinkingLevel: 조언 턴은 `high`(초안 턴과 동일). 400이면 기존과 같이 thinkingConfig를 빼고 재시도.
 
 ### 5.3 첫 턴
-조언 세션의 첫 사용자 메시지 전송 시 `ChatViewModel`이 `BlogReader.listPosts`를 먼저 호출한다(진행 문구 "최근 글을 읽고 있어요"). 성공하면 `BLOG_POSTS` 메시지로 저장하고 시스템 프롬프트 끝에 표(`logNo | 제목 | 날짜 | 댓글 | 공감`)로 넣는다. 실패하면 SYSTEM 한 줄 "글 목록을 읽지 못했어요. 네이버 로그인 상태를 확인해 주세요."를 붙이고 프롬프트엔 "(목록 없음 — 사용자가 글을 지목하면 read_my_post로 읽는다)"로 진행한다. 이후 턴은 저장된 `BLOG_POSTS`를 쓰고, 모델이 `list_my_posts`를 부르면 갱신한다.
+조언 세션의 첫 사용자 메시지 전송 시 `ChatViewModel`이 `BlogReader.listPosts`를 먼저 호출한다(진행 문구 "최근 글을 읽고 있어요"). 성공하면 `BLOG_POSTS` 메시지로 저장하고 시스템 프롬프트 끝에 표(`logNo | 제목 | 날짜 | 댓글 | 공감`)로 넣는다. 실패하면 SYSTEM 한 줄 "글 목록을 읽지 못했어요. 네이버 로그인 상태를 확인해 주세요."를 붙이고 프롬프트엔 "(목록 없음 — 사용자가 글을 지목하면 read_my_post로 읽는다)"로 진행한다. 이후 턴은 저장된 `BLOG_POSTS`를 쓴다(모델이 `list_my_posts`를 부르면 그 턴의 도구 결과로만 쓰고 저장본은 갱신하지 않는다). 목록 읽기는 사용자 메시지를 저장한 뒤에 한다 — 실패 안내가 사용자 말 뒤에 오도록.
 
 ## 6. UI
 
