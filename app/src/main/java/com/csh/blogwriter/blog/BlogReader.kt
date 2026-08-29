@@ -116,4 +116,4 @@ internal fun parsePostView(html: String, logNo: String): PostText? = runCatching
 }.getOrNull()
 
 private fun Element.paragraphs(): List<String> =
-    select("p.se-text-paragraph").map { it.text().replace(' ', ' ').trim() }.filter { it.isNotEmpty() }
+    select("p.se-text-paragraph").map { it.text().replace('\u00A0', ' ').trim() }.filter { it.isNotEmpty() }

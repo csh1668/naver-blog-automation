@@ -47,6 +47,12 @@ class BlogReaderTest {
         assertTrue(text.indexOf("한눈에 보기") < text.indexOf("방문 계기")) // 순서 유지
     }
 
+    @Test fun parsesPostViewNormalizesNonBreakingSpaces() {
+        val html = "<div class=\"se-main-container\"><div class=\"se-component se-text\"><p class=\"se-text-paragraph\"><span>가 나</span></p></div></div>"
+        val post = parsePostView(html, "1")!!
+        assertEquals("가 나", post.text())
+    }
+
     @Test fun postViewWithoutMainContainerGivesNull() {
         assertNull(parsePostView("<html><body><p>없음</p></body></html>", "1"))
     }
