@@ -1,5 +1,8 @@
 package com.csh.blogwriter.ui.chat
 
+import com.csh.blogwriter.blog.BlogReader
+import com.csh.blogwriter.blog.PostSummary
+import com.csh.blogwriter.blog.PostText
 import com.csh.blogwriter.chat.AttachedPhoto
 import com.csh.blogwriter.chat.Attachment
 import com.csh.blogwriter.chat.ChatContext
@@ -153,11 +156,11 @@ class ChatViewModelTest {
         val lastCheckAt = MutableStateFlow(0L)
         val dismissedTag = MutableStateFlow<String?>(null)
 
-        val storedBlogId = MutableStateFlow<String?>(null)
-        override val blogId: Flow<String?> = storedBlogId
+        val blogIdFlow = MutableStateFlow<String?>("sampleblog")
+        override val blogId: Flow<String?> = blogIdFlow
         // 게이트 테스트의 글 길이(1000/1100/1300/1500자)는 이 범위를 기준으로 짜여 있다 — 앱 기본값이 바뀌어도 테스트는 고정.
         override val modelPolicy: Flow<com.csh.blogwriter.llm.ModelPolicy> = flowOf(com.csh.blogwriter.llm.ModelPolicy.DEFAULT.copy(targetLength = 1200..1800))
-        override suspend fun setBlogId(id: String?) { storedBlogId.value = id }
+        override suspend fun setBlogId(id: String?) { blogIdFlow.value = id }
 
         override val lastUpdateCheckAt: Flow<Long> = lastCheckAt
         override suspend fun setLastUpdateCheckAt(timestamp: Long) { lastCheckAt.value = timestamp }
@@ -176,6 +179,12 @@ class ChatViewModelTest {
         }
     }
 
+    private class FakeBlogReader(var posts: List<PostSummary>? = listOf(PostSummary("100000000001", "원주 카페 늘봄", 0, 1, 2, "요약", 3))) : BlogReader {
+        var listCalls = 0
+        override suspend fun listPosts(blogId: String, count: Int): List<PostSummary>? { listCalls++; return posts }
+        override suspend fun readPost(blogId: String, logNo: String): PostText? = null
+    }
+
     private class RecordingPublishedHook : PublishedHook {
         val published = mutableListOf<Pair<String, String>>()
         override suspend fun onPublished(sessionId: String, url: String) { published += sessionId to url }
@@ -190,6 +199,8 @@ class ChatViewModelTest {
     private var partials: List<String> = listOf("이렇게", "이렇게 써 볼까요?")
     /** 넣어 두면 턴이 여기서 멈춘다 — 턴이 도는 중에 다른 일을 시켜 볼 때 쓴다. */
     private var gate: CompletableDeferred<Unit>? = null
+    /** 턴이 도는 동안 엔진이 리스너를 부르는 상황을 흉내 낸다(도구 호출 등). */
+    private var onTurn: ((TurnListener) -> Unit)? = null
     private var viewModel: ChatViewModel? = null
 
     private val runner = object : TurnRunner {
@@ -200,6 +211,7 @@ class ChatViewModelTest {
                 observedStreaming += viewModel?.uiState?.value?.streamingSay
             }
             listener.onToolStatus("네이버에서 찾고 있어요…")
+            onTurn?.invoke(listener)
             gate?.await()
             return turns.removeFirst()
         }
@@ -212,9 +224,17 @@ class ChatViewModelTest {
     private var photos = FakePhotoAttachments()
     private val settings = FakeSettingsStore()
 
-    private fun newViewModel(hasKey: Boolean = true, checker: UpdateChecker = FakeUpdateChecker(null)): ChatViewModel =
-        ChatViewModel(chatRepo, runner, pendingJobs, photos, FakeApiKeyStore(hasKey), memory, hook, settings, checker)
+    private fun newViewModel(
+        hasKey: Boolean = true,
+        checker: UpdateChecker = FakeUpdateChecker(null),
+        blog: BlogReader = FakeBlogReader(),
+    ): ChatViewModel =
+        ChatViewModel(chatRepo, runner, pendingJobs, photos, FakeApiKeyStore(hasKey), memory, hook, settings, checker, blog)
             .also { viewModel = it }
+
+    private fun say(text: String) = TurnResult.Success(TurnResponse(say = text), emptyList(), "m")
+
+    private fun planTurn() = TurnResult.Success(TurnResponse(say = "계획이에요", plan = PLAN, readyToDraft = true), emptyList(), "m")
 
     /** 품질 게이트를 그냥 통과하는 초안 — 게이트 자체를 보는 테스트는 [longPost] 로 길이를 정한다. */
     private fun post(title: String = "제목") = longPost(1300, title)
@@ -695,6 +715,7 @@ class ChatViewModelTest {
     /** 네이버 로그인 여부(blogId)가 화면 상태에 반영돼 입력창 아래 안내가 뜬다. */
     @Test
     fun loggedInFollowsStoredBlogId() = runTest {
+        settings.blogIdFlow.value = null
         val vm = newViewModel(); vm.open(null); advanceUntilIdle()
         assertFalse(vm.uiState.value.loggedIn)
         settings.setBlogId("myblog"); advanceUntilIdle()
@@ -1132,5 +1153,107 @@ class ChatViewModelTest {
         vm.requestDraft(); advanceUntilIdle()
 
         assertEquals(listOf(listOf("img_001", "img_002")), contexts.single().photoGroups)
+    }
+
+    // ---- 조언 모드 ----
+
+    @Test
+    fun adviceSessionIsCreatedWithModeAndReadsPostListOnce() = runTest {
+        turns += say("어떤 글을 볼까요?"); turns += say("읽어 볼게요")
+        val blog = FakeBlogReader()
+        val vm = newViewModel(blog = blog)
+        vm.openInitial(null); advanceUntilIdle()
+        vm.setMode(SessionMode.ADVICE)
+        vm.send("최근 글 봐 줘"); advanceUntilIdle()
+
+        val session = chatRepo.sessions.value.single()
+        assertEquals(SessionMode.ADVICE, session.mode)
+        assertEquals(1, blog.listCalls)
+        val kinds = chatRepo.of(session.id).map { it.kind }
+        assertEquals(MessageKind.BLOG_POSTS, kinds.first())                       // 목록이 첫 메시지보다 먼저 저장된다
+        assertEquals(SessionMode.ADVICE, contexts.last().mode)
+        assertEquals("원주 카페 늘봄", contexts.last().blogPosts!!.single().title)
+        assertEquals("최근 글 봐 줘", session.title)                             // 조언 세션 제목 = 첫 말
+
+        vm.send("다른 글도"); advanceUntilIdle()
+        assertEquals(1, blog.listCalls)                                        // 둘째 턴은 저장된 목록을 쓴다
+        assertEquals("원주 카페 늘봄", contexts.last().blogPosts!!.single().title)
+    }
+
+    @Test
+    fun adviceFirstTurnSurvivesPostListFailure() = runTest {
+        turns += say("무슨 글인지 알려 주세요")
+        val vm = newViewModel(blog = FakeBlogReader(posts = null))
+        vm.openInitial(null); advanceUntilIdle()
+        vm.setMode(SessionMode.ADVICE)
+        vm.send("칼국수 글 어때?"); advanceUntilIdle()
+
+        val session = chatRepo.sessions.value.single()
+        assertTrue(chatRepo.of(session.id).any { it.kind == MessageKind.SYSTEM && ChatPayloads.readText(it.payloadJson) == ChatViewModel.POSTS_FAILED })
+        assertNull(contexts.last().blogPosts)
+        assertEquals("무슨 글인지 알려 주세요", ChatPayloads.readText(chatRepo.of(session.id).last { it.kind == MessageKind.TEXT }.payloadJson))
+    }
+
+    @Test
+    fun adviceNeedsLoginToSend() = runTest {
+        settings.blogIdFlow.value = null
+        val vm = newViewModel()
+        vm.openInitial(null); advanceUntilIdle()
+        vm.setMode(SessionMode.ADVICE)
+        vm.send("봐 줘"); advanceUntilIdle()
+        assertTrue(chatRepo.sessions.value.isEmpty())
+        assertEquals(ChatViewModel.ADVICE_NEEDS_LOGIN, vm.uiState.value.error)
+        assertTrue(contexts.isEmpty())
+    }
+
+    @Test
+    fun postReadOpensPanelAndIsRestoredOnReopen() = runTest {
+        turns += say("읽었어요")
+        partials = emptyList()
+        val vm = newViewModel()
+        vm.openInitial(null); advanceUntilIdle()
+        vm.setMode(SessionMode.ADVICE)
+        // 엔진이 도구를 돌리다 onPostRead 를 부르는 상황을 흉내 낸다.
+        onTurn = { listener -> listener.onPostRead("100000000001", "원주 카페 늘봄") }
+        vm.send("늘봄 글 봐 줘"); advanceUntilIdle()
+
+        assertEquals(PostView("100000000001", "원주 카페 늘봄"), vm.uiState.value.focusedPost)
+        assertTrue(vm.uiState.value.panelOpen); assertTrue(vm.uiState.value.hasPanel)
+        val session = chatRepo.sessions.value.single()
+        assertTrue(chatRepo.of(session.id).any { it.kind == MessageKind.POST_VIEW })
+
+        vm.open(null); advanceUntilIdle()
+        vm.open(session.id); advanceUntilIdle()
+        assertEquals(SessionMode.ADVICE, vm.uiState.value.mode)
+        assertEquals("원주 카페 늘봄", vm.uiState.value.focusedPost?.title)
+        assertTrue(vm.uiState.value.panelOpen)
+    }
+
+    @Test
+    fun adviceSessionIgnoresWriteOnlyFeatures() = runTest {
+        turns += say("네")
+        val vm = newViewModel()
+        vm.openInitial(null); advanceUntilIdle()
+        vm.setMode(SessionMode.ADVICE)
+        vm.send("안녕"); advanceUntilIdle()
+        vm.attachPhotos(listOf("content://a")); advanceUntilIdle()
+        assertTrue(vm.uiState.value.attachments.isEmpty())
+        vm.requestDraft(); advanceUntilIdle()
+        assertEquals(1, contexts.size)                                         // 초안 턴이 돌지 않았다
+        assertNull(vm.uiState.value.plan); assertNull(vm.uiState.value.draftGate)
+        // 모드는 세션이 생긴 뒤 바뀌지 않는다.
+        vm.setMode(SessionMode.WRITE)
+        assertEquals(SessionMode.ADVICE, vm.uiState.value.mode)
+    }
+
+    @Test
+    fun writeSessionKeepsPostListUntouched() = runTest {
+        turns += planTurn()
+        val blog = FakeBlogReader()
+        val vm = newViewModel(blog = blog)
+        vm.openInitial(null); advanceUntilIdle()
+        vm.send("원주 한우 다녀왔어"); advanceUntilIdle()
+        assertEquals(0, blog.listCalls)
+        assertEquals(SessionMode.WRITE, contexts.last().mode)
     }
 }

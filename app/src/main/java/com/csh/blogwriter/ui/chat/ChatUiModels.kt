@@ -5,6 +5,7 @@ import com.csh.blogwriter.chat.AttachedPhoto
 import com.csh.blogwriter.data.repo.ChatMessage
 import com.csh.blogwriter.data.repo.ChatSession
 import com.csh.blogwriter.data.repo.MessageKind
+import com.csh.blogwriter.data.repo.SessionMode
 import com.csh.blogwriter.domain.model.PostContent
 import com.csh.blogwriter.domain.model.PostContentJson
 import kotlinx.serialization.builtins.ListSerializer
@@ -36,6 +37,8 @@ data class ChatUiState(
     val hasKey: Boolean = true,
     /** 네이버 로그인(blogId 확보) 여부. 아니면 입력창 아래에 로그인 안내를 보인다. */
     val loggedIn: Boolean = true,
+    /** 로그인한 네이버 블로그 id. 조언 모드가 글 목록·본문을 읽을 때 쓴다. */
+    val blogId: String? = null,
     /** 에디터에 넣기 전에 잡아 둔 초안. 사용자가 "이대로 넣기"를 고르면 그대로 진행한다. */
     val draftGate: DraftGate? = null,
     /** [attachments] 중 여기부터가 "아직 안 보낸" 사진 — 입력창 위 사진판에 보여 주고 보내면 비운다. */
@@ -44,6 +47,10 @@ data class ChatUiState(
     val photoGroups: List<List<String>> = emptyList(),
     /** 묶기 모드에서 고른 ref — 고른 순서대로. null 이면 묶는 중이 아니다. */
     val groupPicks: List<String>? = null,
+    /** 이 대화가 글쓰기인지 조언인지. 세션이 생기기 전에는 사용자가 고른 값이다. */
+    val mode: SessionMode = SessionMode.WRITE,
+    /** 조언 모드에서 오른쪽 패널로 열어 둔 글. */
+    val focusedPost: PostView? = null,
 ) {
     /** 지금 사진을 묶는 중인가. */
     val grouping: Boolean get() = groupPicks != null
@@ -57,8 +64,11 @@ data class ChatUiState(
     /** 오른쪽 패널에 그릴 최신 계획(마크다운). 초안이 나온 뒤에도 남아 있지만 패널은 에디터가 차지한다. */
     val plan: String? get() = messages.lastOrNull { it.kind == MessageKind.PLAN }?.let { ChatPayloads.readPlan(it.payloadJson) }
 
-    /** 오른쪽에 보여 줄 것이 있는가 — 계획이든 초안이든. */
-    val hasPanel: Boolean get() = panelJobId != null || plan != null
+    /** 오른쪽에 보여 줄 것이 있는가 — 글쓰기는 계획이나 초안, 조언은 열어 둔 글. */
+    val hasPanel: Boolean get() = when (mode) {
+        SessionMode.WRITE -> panelJobId != null || plan != null
+        SessionMode.ADVICE -> focusedPost != null
+    }
 }
 
 /**

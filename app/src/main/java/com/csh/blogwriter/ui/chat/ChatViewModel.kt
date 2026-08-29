@@ -2,6 +2,7 @@ package com.csh.blogwriter.ui.chat
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.csh.blogwriter.blog.BlogReader
 import com.csh.blogwriter.chat.AttachedPhoto
 import com.csh.blogwriter.chat.ChatContext
 import com.csh.blogwriter.chat.PhotoAttachments
@@ -21,6 +22,7 @@ import com.csh.blogwriter.data.repo.MessageKind
 import com.csh.blogwriter.data.repo.MessageRole
 import com.csh.blogwriter.data.repo.PendingJob
 import com.csh.blogwriter.data.repo.PendingJobRepository
+import com.csh.blogwriter.data.repo.SessionMode
 import com.csh.blogwriter.data.repo.SessionStatus
 import com.csh.blogwriter.domain.model.Block
 import com.csh.blogwriter.domain.model.PostContent
@@ -63,6 +65,7 @@ class ChatViewModel @Inject constructor(
     private val publishedHook: PublishedHook,
     private val settings: SettingsStore,
     private val updateChecker: UpdateChecker,
+    private val blog: BlogReader,
 ) : ViewModel() {
 
     companion object {
@@ -71,6 +74,12 @@ class ChatViewModel @Inject constructor(
         const val DRAFT_CHIP = "이대로 초안 써 줘"
         const val NO_KEY = "글을 쓰려면 관리자가 열쇠를 등록해야 해요"
         const val NO_PHOTO_AFTER_DRAFT = "초안을 만든 뒤에는 사진을 더 붙일 수 없어요. 새 글에서 이어 가 주세요."
+        /** 조언은 내 블로그 글을 읽어야 하므로 로그인(blogId)이 먼저다. */
+        const val ADVICE_NEEDS_LOGIN = "조언은 네이버 로그인 후에 받을 수 있어요"
+        const val POSTS_FAILED = "글 목록을 읽지 못했어요. 네이버 로그인 상태를 확인해 주세요."
+        const val READING_POSTS = "최근 글을 읽고 있어요"
+        /** 조언 세션 이름은 첫 말을 이만큼만 잘라 쓴다. */
+        const val ADVICE_TITLE_MAX = 24
         /** 품질 게이트 카드의 제목과 버튼. */
         const val GATE_TITLE = "초안을 넣기 전에 확인해 주세요"
         const val GATE_ACCEPT = "이대로 넣기"
@@ -113,7 +122,7 @@ class ChatViewModel @Inject constructor(
             keyStore.hasUsableKey.collect { has -> _uiState.update { it.copy(hasKey = has) } }
         }
         viewModelScope.launch {
-            settings.blogId.collect { id -> _uiState.update { it.copy(loggedIn = id != null) } }
+            settings.blogId.collect { id -> _uiState.update { it.copy(loggedIn = id != null, blogId = id) } }
         }
         viewModelScope.launch {
             val now = System.currentTimeMillis()
@@ -151,13 +160,13 @@ class ChatViewModel @Inject constructor(
         messagesJob?.cancel()
         messagesJob = null
         if (sessionId == null) {
-            _uiState.value = ChatUiState(hasKey = _uiState.value.hasKey, loggedIn = _uiState.value.loggedIn)
+            _uiState.value = emptyState()
             return
         }
         viewModelScope.launch {
             // 없는 대화를 가리키면(지워졌거나 잘못된 id) "새 글" 로 돌아간다 — 반쯤 죽은 화면을 남기지 않게.
             val stored = chatRepo.getSession(sessionId) ?: run {
-                _uiState.value = ChatUiState(hasKey = _uiState.value.hasKey, loggedIn = _uiState.value.loggedIn)
+                _uiState.value = emptyState()
                 return@launch
             }
             val session = detachVanishedJob(stored)
@@ -166,6 +175,8 @@ class ChatViewModel @Inject constructor(
             val groups = restoreGroups(history, photos.map { it.ref })
             // 이어 쓰던 글이나 세워 둔 계획이 있으면 오른쪽을 바로 펼쳐 준다 — "보기"를 다시 누르지 않게.
             val hasSomethingToShow = session.pendingJobId != null || history.any { it.kind == MessageKind.PLAN }
+            // 조언 대화는 마지막으로 열어 본 글을 그 자리에 다시 건다.
+            val focused = restoreFocusedPost(history)
             // 새 상태로 통째로 갈아 끼운다 — thinking·streamingSay·toolStatus·칩이 함께 초기화된다.
             _uiState.value = ChatUiState(
                 session = session,
@@ -174,13 +185,26 @@ class ChatViewModel @Inject constructor(
                 // 이전에 붙였던 사진은 이미 대화에 반영돼 있으므로 사진판은 비운 채로 연다.
                 trayFrom = photos.size,
                 panelJobId = session.pendingJobId,
-                panelOpen = hasSomethingToShow,
-                listCollapsed = hasSomethingToShow,
+                panelOpen = hasSomethingToShow || focused != null,
+                listCollapsed = hasSomethingToShow || focused != null,
                 hasKey = _uiState.value.hasKey,
                 loggedIn = _uiState.value.loggedIn,
+                blogId = _uiState.value.blogId,
+                mode = session.mode,
+                focusedPost = focused,
             )
             observeMessages(session.id)
         }
+    }
+
+    /** "새 글" 의 빈 상태. 대화에 딸리지 않는 것(열쇠·로그인)만 이어 간다 — 모드는 글쓰기로 돌아간다. */
+    private fun emptyState() =
+        ChatUiState(hasKey = _uiState.value.hasKey, loggedIn = _uiState.value.loggedIn, blogId = _uiState.value.blogId)
+
+    /** 새 대화의 모드를 고른다. 대화가 이미 생겼으면 바꾸지 않는다 — 기록과 어긋나지 않게. */
+    fun setMode(mode: SessionMode) {
+        if (_uiState.value.session != null) return
+        _uiState.update { it.copy(mode = mode) }
     }
 
     /** 사진 첨부와 보내기가 거의 동시에 들어와도 대화는 하나만 만들도록 직렬화한다. */
@@ -189,7 +213,7 @@ class ChatViewModel @Inject constructor(
     /** 지금 열려 있는 대화. 없으면(= "새 글") 여기서 만든다 — 첫 메시지·첫 사진 때만 생긴다. */
     private suspend fun ensureSession(): ChatSession = sessionLock.withLock {
         _uiState.value.session?.let { return@withLock it }
-        val session = chatRepo.createSession()
+        val session = chatRepo.createSession(_uiState.value.mode)
         _uiState.update { it.copy(session = session) }
         observeMessages(session.id)
         session
@@ -220,7 +244,13 @@ class ChatViewModel @Inject constructor(
     fun send(text: String) {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
-        runTurn(trimmed, draftTurn = readyToDraft && DRAFT_WORDS.containsMatchIn(trimmed))
+        val state = _uiState.value
+        // 조언은 내 글을 읽어야 시작할 수 있다 — 대화도 만들지 않고 안내만 띄운다.
+        if (state.mode == SessionMode.ADVICE && state.blogId == null) {
+            _uiState.update { it.copy(error = ADVICE_NEEDS_LOGIN) }
+            return
+        }
+        runTurn(trimmed, draftTurn = state.mode == SessionMode.WRITE && readyToDraft && DRAFT_WORDS.containsMatchIn(trimmed))
     }
 
     fun sendQuickReply(text: String) = when (text) {
@@ -232,11 +262,13 @@ class ChatViewModel @Inject constructor(
     /** 초안이 이미 있거나 답을 기다리는 중이면 초안 턴을 열지 않는다(모델이 잘못 보낸 칩으로도). */
     fun requestDraft() {
         val s = _uiState.value
+        if (s.mode != SessionMode.WRITE) return
         if (s.panelJobId != null || s.thinking) return
         runTurn(DRAFT_CHIP, draftTurn = true)
     }
 
     fun attachPhotos(uris: List<String>) {
+        if (_uiState.value.mode != SessionMode.WRITE) return
         if (uris.isEmpty()) return
         // 초안이 나온 뒤에 붙인 사진은 아직 에디터에 올라가 있지 않다 — 다음 수정본이 그 ref 를 쓰면
         // 주입이 통째로 실패한다. 증분 업로드는 SP3, SP2 에서는 아예 막는다.
@@ -291,6 +323,7 @@ class ChatViewModel @Inject constructor(
 
     /** 사진 2~4장을 한 묶음으로 고르기 시작한다. 초안이 나온 뒤에는 묶음을 바꿀 수 없다. */
     fun startGrouping() {
+        if (_uiState.value.mode != SessionMode.WRITE) return
         if (_uiState.value.panelJobId != null) return
         _uiState.update { it.copy(groupPicks = emptyList()) }
     }
@@ -462,6 +495,7 @@ class ChatViewModel @Inject constructor(
                     system(sessionId, NO_KEY)
                     return@launch
                 }
+                if (session.mode == SessionMode.ADVICE) ensurePostList(sessionId)
                 // 턴이 실제로 시작될 때만 사진판을 비운다 (대화의 사진 목록에는 그대로 남는다).
                 _uiState.update { it.copy(trayFrom = it.attachments.size) }
                 if (userText != null) {
@@ -490,6 +524,18 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /** 조언 세션의 첫 턴에 최근 글 목록을 한 번 읽어 둔다. 이미 있으면 그대로 쓴다(사용자 메시지 1회당 목록 1회 원칙은 도구 쪽 한도가 지킨다). */
+    private suspend fun ensurePostList(sessionId: String) {
+        val history = chatRepo.messagesOnce(sessionId)
+        if (history.any { it.kind == MessageKind.BLOG_POSTS || (it.kind == MessageKind.SYSTEM && ChatPayloads.readText(it.payloadJson) == POSTS_FAILED) }) return
+        val blogId = _uiState.value.blogId ?: return
+        _uiState.update { it.copy(toolStatus = READING_POSTS) }
+        val posts = blog.listPosts(blogId)
+        if (posts == null) system(sessionId, POSTS_FAILED)
+        else chatRepo.appendMessage(sessionId, MessageRole.SYSTEM, MessageKind.BLOG_POSTS, ChatPayloads.blogPosts(posts))
+        _uiState.update { it.copy(toolStatus = null) }
+    }
+
     /** 지금 화면에 떠 있는 대화가 [sessionId] 인가. 늦게 온 결과를 버릴 때 쓴다. */
     private fun isCurrent(sessionId: String) = _uiState.value.session?.id == sessionId
 
@@ -497,31 +543,52 @@ class ChatViewModel @Inject constructor(
         override fun onToolStatus(text: String) = _uiState.update { it.copy(toolStatus = text) }
         // 값은 늘 "지금까지의 전체 접두" 다 — 이어붙이지 않고 교체한다. 빈 문자열은 지우라는 뜻.
         override fun onPartialSay(text: String) = _uiState.update { it.copy(streamingSay = text.ifEmpty { null }) }
+        // 조언 도구가 글을 읽으면 오른쪽을 그 글로 연다. 대화에도 남겨 다시 열 때 되살린다.
+        override fun onPostRead(logNo: String, title: String) {
+            val sessionId = _uiState.value.session?.id ?: return
+            val view = PostView(logNo, title)
+            _uiState.update { it.copy(focusedPost = view, panelOpen = true, listCollapsed = true) }
+            viewModelScope.launch { if (isCurrent(sessionId)) chatRepo.appendMessage(sessionId, MessageRole.SYSTEM, MessageKind.POST_VIEW, ChatPayloads.postView(view)) }
+        }
     }
 
     private suspend fun context(session: ChatSession, draftTurn: Boolean): ChatContext {
-        val history = chatRepo.messagesOnce(session.id)
-            .filterNot { it.role == MessageRole.SYSTEM || it.kind == MessageKind.SYSTEM }
+        val all = chatRepo.messagesOnce(session.id)
+        val history = all.filterNot { it.role == MessageRole.SYSTEM || it.kind == MessageKind.SYSTEM }
+        // 조언 세션은 사진·계획·초안을 쓰지 않는다 — 프롬프트에도 실어 보내지 않는다.
+        val write = session.mode == SessionMode.WRITE
         val style = memory.activeItems()
             .filter { it.kind == MemoryKind.STYLE }
             .joinToString("\n") { it.text }
             .ifEmpty { null }
         return ChatContext(
             history = history,
-            attachments = photoAttachments.attachments(session.id, _uiState.value.attachments),
-            photoGroups = _uiState.value.photoGroups,
+            attachments = if (write) photoAttachments.attachments(session.id, _uiState.value.attachments) else emptyList(),
+            photoGroups = if (write) _uiState.value.photoGroups else emptyList(),
             style = style,
             draftTurn = draftTurn,
             // 초안이 나오기 전까지는 계획을 함께 보낸다 — 모델이 "이 계획을 고쳐라"로 읽는다.
-            currentPlan = if (_uiState.value.panelJobId == null) lastPlan(history) else null,
+            currentPlan = if (write && _uiState.value.panelJobId == null) lastPlan(history) else null,
             // 재주입 조건과 같아야 한다 — 패널을 접어 두고 "문단 2를 더 짧게" 라고 해도 지금 초안을 함께 보낸다.
-            currentPost = if (_uiState.value.panelJobId != null) lastPost(history) else null,
+            currentPost = if (write && _uiState.value.panelJobId != null) lastPost(history) else null,
             questionRounds = questionRounds(history),
+            mode = session.mode,
+            blogPosts = all.lastOrNull { it.kind == MessageKind.BLOG_POSTS }?.let { ChatPayloads.readBlogPosts(it.payloadJson) },
         )
     }
 
     private suspend fun onSuccess(sessionId: String, response: TurnResponse, repairs: List<String>) {
         val session = sessionOf(sessionId) ?: return
+        // 조언은 말만 남긴다 — 계획·초안·품질 게이트는 글쓰기 몫이다.
+        if (session.mode == SessionMode.ADVICE) {
+            chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.TEXT, ChatPayloads.text(response.say))
+            _uiState.update { it.copy(streamingSay = null) }
+            if (session.title == null) {
+                val first = chatRepo.messagesOnce(sessionId).firstOrNull { it.role == MessageRole.USER && it.kind == MessageKind.TEXT }
+                first?.let { updateSession(session.copy(title = ChatPayloads.readText(it.payloadJson).take(ADVICE_TITLE_MAX))) }
+            }
+            return
+        }
         // post 는 사용자가 초안을 요청한 턴, 또는 이미 초안이 있어 고치는 턴에서만 받는다.
         // 모델이 계획 단계에서 성급하게 post 를 내면 버린다 — 초안은 입력창 위 버튼으로만 시작한다.
         val hasDraft = session.pendingJobId != null
@@ -689,6 +756,10 @@ class ChatViewModel @Inject constructor(
 
     private fun lastPlan(history: List<ChatMessage>): String? =
         history.lastOrNull { it.kind == MessageKind.PLAN }?.let { ChatPayloads.readPlan(it.payloadJson) }
+
+    /** 조언 대화를 다시 열 때 마지막으로 보던 글. */
+    private fun restoreFocusedPost(history: List<ChatMessage>): PostView? =
+        history.lastOrNull { it.kind == MessageKind.POST_VIEW }?.let { ChatPayloads.readPostView(it.payloadJson) }
 
     /** 계획 첫 줄의 `# 제목` — 세션 이름으로 쓴다. */
     private fun planTitle(markdown: String): String? =
