@@ -29,6 +29,8 @@ data class ChatUiState(
     val panelOpen: Boolean = false,
     val listCollapsed: Boolean = false,
     val hasKey: Boolean = true,
+    /** 네이버 로그인(blogId 확보) 여부. 아니면 입력창 아래에 로그인 안내를 보인다. */
+    val loggedIn: Boolean = true,
     /** 에디터에 넣기 전에 잡아 둔 초안. 사용자가 "이대로 넣기"를 고르면 그대로 진행한다. */
     val draftGate: DraftGate? = null,
     /** [attachments] 중 여기부터가 "아직 안 보낸" 사진 — 입력창 위 사진판에 보여 주고 보내면 비운다. */

@@ -41,7 +41,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-data class SettingsUiState(val apiKeyCount: Int = 0, val researchEnabled: Boolean = true)
+data class SettingsUiState(val apiKeyCount: Int = 0, val researchEnabled: Boolean = true, val loggedIn: Boolean = false)
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -49,8 +49,8 @@ class SettingsViewModel @Inject constructor(
     keyStore: ApiKeyStore,
     private val naverSession: NaverSession,
 ) : ViewModel() {
-    val uiState: StateFlow<SettingsUiState> = combine(keyStore.keys, settings.researchEnabled) { keys, research ->
-        SettingsUiState(apiKeyCount = keys.size, researchEnabled = research)
+    val uiState: StateFlow<SettingsUiState> = combine(keyStore.keys, settings.researchEnabled, settings.blogId) { keys, research, blogId ->
+        SettingsUiState(apiKeyCount = keys.size, researchEnabled = research, loggedIn = blogId != null)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
     fun setResearchEnabled(enabled: Boolean) = viewModelScope.launch { settings.setResearchEnabled(enabled) }
@@ -65,6 +65,7 @@ fun SettingsScreen(
     onPrompts: () -> Unit,
     onMemory: () -> Unit,
     onFailureLogs: () -> Unit,
+    onLogin: () -> Unit,
     onLoggedOut: () -> Unit,
     onBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
@@ -86,7 +87,9 @@ fun SettingsScreen(
         Spacer(Modifier.height(AppSpacing.md))
         ListRow(title = "실패 로그", onClick = onFailureLogs)
         Spacer(Modifier.height(AppSpacing.md))
-        ListRow(title = "네이버 로그아웃", onClick = { logoutConfirm = true }, trailingChevron = false)
+        // 로그인 전에는 여기서 바로 로그인할 수 있게 한다 — 첫 화면이 채팅이라 따로 로그인 화면을 거치지 않으므로.
+        if (state.loggedIn) ListRow(title = "네이버 로그아웃", onClick = { logoutConfirm = true }, trailingChevron = false)
+        else ListRow(title = "네이버 로그인", subtitle = "글을 올리려면 로그인이 필요해요", onClick = onLogin)
     }
 
     ConfirmSheet(

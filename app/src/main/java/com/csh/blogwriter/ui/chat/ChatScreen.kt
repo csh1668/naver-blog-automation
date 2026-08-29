@@ -115,6 +115,7 @@ fun ChatScreen(
     onAdmin: () -> Unit,
     onSessionExpired: (jobId: String) -> Unit,
     onFailed: (jobId: String) -> Unit,
+    onLogin: () -> Unit,
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
     val ui by viewModel.uiState.collectAsStateWithLifecycle()
@@ -180,6 +181,7 @@ fun ChatScreen(
                     onOpenMemory = onOpenMemory,
                     onOpenSessions = null,
                     onComposerFocusChanged = { composerFocused = it },
+                    onLogin = onLogin,
                 )
                 if (panelMountedNow) {
                     // 접을 때는 폭만 0 으로 줄인다 — 컴포지션에 남아 있어야 WebView 와 편집 내용이 살아남는다.
@@ -220,6 +222,7 @@ fun ChatScreen(
                     onOpenMemory = onOpenMemory,
                     onOpenSessions = { scope.launch { drawerState.open() } },
                     onComposerFocusChanged = { composerFocused = it },
+                    onLogin = onLogin,
                 )
             }
             if (panelMountedNow) {
@@ -254,6 +257,7 @@ private fun ChatPane(
     onOpenMemory: () -> Unit,
     onOpenSessions: (() -> Unit)?,
     onComposerFocusChanged: (Boolean) -> Unit,
+    onLogin: () -> Unit,
 ) {
     val c = AppTheme.colors
     val context = LocalContext.current
@@ -355,6 +359,7 @@ private fun ChatPane(
                     Spacer(Modifier.height(AppSpacing.section))
                     AttachmentTray(ui.tray, viewModel)
                     composer(true)
+                    if (!ui.loggedIn) LoginNudge(onLogin)
                 }
             }
         } else {
@@ -391,6 +396,7 @@ private fun ChatPane(
                 )
             }
             composer(false)
+            if (!ui.loggedIn) LoginNudge(onLogin)
         }
     }
 }
@@ -511,6 +517,23 @@ private fun PanelHost(
         onCancelRequest = chatViewModel::togglePanel,
         contentScalePercent = scalePercent,
     )
+}
+
+/** 네이버에 로그인돼 있지 않을 때 입력창 아래에 붙는 안내. 로그인이 풀려도 여기서 바로 다시 할 수 있다. */
+@Composable
+private fun LoginNudge(onLogin: () -> Unit) {
+    val c = AppTheme.colors
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "네이버에 로그인되어 있지 않아요. 글을 올리려면 로그인이 필요해요.",
+            style = AppTheme.typography.body2, color = c.textSecondary, modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(AppSpacing.sm))
+        WeakButton("로그인하기", onClick = onLogin)
+    }
 }
 
 /**

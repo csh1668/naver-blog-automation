@@ -25,10 +25,9 @@ fun AppNavHost() {
             val returnTo = entry.toRoute<Routes.Login>().returnTo
             LoginScreen(
                 onBack = { nav.popBackStack() },
-                onDone = {
-                    nav.popBackStack()
-                    if (returnTo?.startsWith("publish:") == true) nav.navigate(Routes.Publish(returnTo.removePrefix("publish:")))
-                },
+                // 로그인이 끝나면 왔던 화면으로 돌아간다. 채팅에서 왔으면 채팅의 패널이 다시 붙으면서
+                // 에디터를 로그인된 상태로 다시 연다(전체 화면 발행 화면으로 빠지지 않는다).
+                onDone = { nav.popBackStack() },
             )
         }
         composable<Routes.Chat> { entry ->
@@ -38,6 +37,7 @@ fun AppNavHost() {
                 onAdmin = { nav.navigate(Routes.Admin) },
                 onSessionExpired = { id -> nav.navigate(Routes.Login("publish:$id")) { popUpTo<Routes.Chat>() } },
                 onFailed = { id -> nav.navigate(Routes.Fallback(id)) { popUpTo<Routes.Chat>() } },
+                onLogin = { nav.navigate(Routes.Login(null)) },
             )
         }
         composable<Routes.Publish> {
@@ -63,6 +63,7 @@ fun AppNavHost() {
                 onPrompts = { nav.navigate(Routes.Prompts) },
                 onMemory = { nav.navigate(Routes.Memory) },
                 onFailureLogs = { nav.navigate(Routes.FailureLogs) },
+                onLogin = { nav.navigate(Routes.Login(null)) },
                 onLoggedOut = { nav.popBackStack<Routes.Chat>(inclusive = false) },
                 onBack = { nav.popBackStack() },
             )

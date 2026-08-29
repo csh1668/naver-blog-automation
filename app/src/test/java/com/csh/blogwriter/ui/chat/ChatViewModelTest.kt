@@ -152,8 +152,9 @@ class ChatViewModelTest {
         val lastCheckAt = MutableStateFlow(0L)
         val dismissedTag = MutableStateFlow<String?>(null)
 
-        override val blogId: Flow<String?> = flowOf(null)
-        override suspend fun setBlogId(id: String?) {}
+        val storedBlogId = MutableStateFlow<String?>(null)
+        override val blogId: Flow<String?> = storedBlogId
+        override suspend fun setBlogId(id: String?) { storedBlogId.value = id }
 
         override val lastUpdateCheckAt: Flow<Long> = lastCheckAt
         override suspend fun setLastUpdateCheckAt(timestamp: Long) { lastCheckAt.value = timestamp }
@@ -674,6 +675,15 @@ class ChatViewModelTest {
         val md = ChatPayloads.readPlan("""{"titleCandidates":["첫 제목","둘째"],"outline":[{"heading":"가는 길","summary":"주차 팁"}],"tone":"다정하게"}""")
         val expected = listOf("# 첫 제목", "다른 제목: 둘째", "", "## 글 구성", "1. 가는 길 — 주차 팁", "", "## 말투와 분위기", "다정하게").joinToString("\n") + "\n"
         assertEquals(expected, md)
+    }
+
+    /** 네이버 로그인 여부(blogId)가 화면 상태에 반영돼 입력창 아래 안내가 뜬다. */
+    @Test
+    fun loggedInFollowsStoredBlogId() = runTest {
+        val vm = newViewModel(); vm.open(null); advanceUntilIdle()
+        assertFalse(vm.uiState.value.loggedIn)
+        settings.setBlogId("myblog"); advanceUntilIdle()
+        assertTrue(vm.uiState.value.loggedIn)
     }
 
     /** 못 읽은 사진 자리를 비워 두면 다음 첨부에서 번호가 겹친다 — 붙일 때마다 전체를 다시 매긴다. */

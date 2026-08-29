@@ -108,6 +108,9 @@ class ChatViewModel @Inject constructor(
             keyStore.hasUsableKey.collect { has -> _uiState.update { it.copy(hasKey = has) } }
         }
         viewModelScope.launch {
+            settings.blogId.collect { id -> _uiState.update { it.copy(loggedIn = id != null) } }
+        }
+        viewModelScope.launch {
             val now = System.currentTimeMillis()
             if (now - settings.lastUpdateCheckAtOnce() < UPDATE_CHECK_INTERVAL_MS) return@launch
             settings.setLastUpdateCheckAt(now)
@@ -143,13 +146,13 @@ class ChatViewModel @Inject constructor(
         messagesJob?.cancel()
         messagesJob = null
         if (sessionId == null) {
-            _uiState.value = ChatUiState(hasKey = _uiState.value.hasKey)
+            _uiState.value = ChatUiState(hasKey = _uiState.value.hasKey, loggedIn = _uiState.value.loggedIn)
             return
         }
         viewModelScope.launch {
             // 없는 대화를 가리키면(지워졌거나 잘못된 id) "새 글" 로 돌아간다 — 반쯤 죽은 화면을 남기지 않게.
             val stored = chatRepo.getSession(sessionId) ?: run {
-                _uiState.value = ChatUiState(hasKey = _uiState.value.hasKey)
+                _uiState.value = ChatUiState(hasKey = _uiState.value.hasKey, loggedIn = _uiState.value.loggedIn)
                 return@launch
             }
             val session = detachVanishedJob(stored)
@@ -167,6 +170,7 @@ class ChatViewModel @Inject constructor(
                 panelOpen = hasSomethingToShow,
                 listCollapsed = hasSomethingToShow,
                 hasKey = _uiState.value.hasKey,
+                loggedIn = _uiState.value.loggedIn,
             )
             observeMessages(session.id)
         }
