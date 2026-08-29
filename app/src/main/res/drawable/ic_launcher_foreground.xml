@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  앱 아이콘 전경(어댑티브 108dp 캔버스, 가운데 72dp 가 안전 영역).
+  흰 말풍선 안에 파란 연필: "채팅으로 글을 쓴다". 배경은 ic_launcher_background(토스 블루).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 말풍선: 둥근 사각형 + 왼쪽 아래 꼬리 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M30,28
+            H78
+            A9,9 0 0 1 87,37
+            V63
+            A9,9 0 0 1 78,72
+            H46
+            L34,82
+            L36,72
+            H30
+            A9,9 0 0 1 21,63
+            V37
+            A9,9 0 0 1 30,28 Z" />
+
+    <!-- 연필 몸통 (기울어진 막대) -->
+    <path
+        android:fillColor="#FF3182F6"
+        android:pathData="M42,63 L61,44 L67,50 L48,69 Z" />
+    <!-- 연필 촉 -->
+    <path
+        android:fillColor="#FF1B64DA"
+        android:pathData="M42,63 L48,69 L40,71 Z" />
+    <!-- 연필 지우개 쪽 -->
+    <path
+        android:fillColor="#FF90C2FF"
+        android:pathData="M61,44 L65,40 L71,46 L67,50 Z" />
+
+    <!-- 말풍선 안 글줄 두 개 (연필 왼쪽 아래 여백) -->
+    <path
+        android:fillColor="#FFDCE8FA"
+        android:pathData="M31,40 H50 A2,2 0 0 1 50,44 H31 A2,2 0 0 1 31,40 Z" />
+    <path
+        android:fillColor="#FFDCE8FA"
+        android:pathData="M31,50 H44 A2,2 0 0 1 44,54 H31 A2,2 0 0 1 31,50 Z" />
+</vector>
