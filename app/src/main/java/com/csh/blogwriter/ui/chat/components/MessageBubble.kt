@@ -43,7 +43,7 @@ fun MessageBubble(text: String, mine: Boolean, markdown: Boolean = false) {
                 .padding(horizontal = AppSpacing.lg, vertical = AppSpacing.md),
         ) {
             if (markdown) {
-                MarkdownLite(text)
+                MarkdownLite(text, bodyColor = c.textPrimary)
             } else {
                 Text(text, style = AppTheme.typography.body1, color = if (mine) c.textOnBrand else c.textPrimary)
             }

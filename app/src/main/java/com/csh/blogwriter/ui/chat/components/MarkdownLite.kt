@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -104,7 +105,7 @@ fun blocksToMarkdown(blocks: List<MdBlock>): String = blocks.joinToString("\n\n"
 }
 
 @Composable
-fun MarkdownLite(text: String, modifier: Modifier = Modifier) {
+fun MarkdownLite(text: String, modifier: Modifier = Modifier, bodyColor: Color = AppTheme.colors.textSecondary) {
     val c = AppTheme.colors
     val t = AppTheme.typography
     Column(modifier) {
@@ -120,7 +121,7 @@ fun MarkdownLite(text: String, modifier: Modifier = Modifier) {
                 is MdBlock.Numbered -> MarkerLine("${block.number}.", block.spans)
                 is MdBlock.Paragraph -> Text(
                     annotated(block.spans),
-                    style = t.body1, color = c.textSecondary,
+                    style = t.body1, color = bodyColor,
                     modifier = Modifier.padding(vertical = AppSpacing.xs),
                 )
             }
