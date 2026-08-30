@@ -27,4 +27,10 @@ class TurnSchemasTest {
         assertEquals(setOf("say"), s["properties"]!!.jsonObject.keys)
         assertEquals(listOf("web_search", "open_page", "remember"), TurnSchemas.functionDeclarations(SessionMode.FREE).map { it.name })
     }
+    @Test fun sayDescriptionDiffersByModeAndAdviceIsUnchanged() {
+        val advice = TurnSchemas.turnResponseJsonSchema(SessionMode.ADVICE)
+        val free = TurnSchemas.turnResponseJsonSchema(SessionMode.FREE)
+        assertEquals("조언 본문. 마크다운 없이 줄바꿈만, 800자 안팎", advice["properties"]!!.jsonObject["say"]!!.jsonObject["description"]!!.jsonPrimitive.content)
+        assertTrue(free["properties"]!!.jsonObject["say"]!!.jsonObject["description"]!!.jsonPrimitive.content.contains("마크다운"))
+    }
 }

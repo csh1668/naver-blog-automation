@@ -55,9 +55,9 @@ object TurnSchemas {
         putJsonArray("required") { add("title"); add("blocks") }
     }
 
-    private val sayOnly = buildJsonObject {
+    private fun sayOnly(desc: String) = buildJsonObject {
         put("type", "object")
-        putJsonObject("properties") { put("say", str("말풍선 본문")) }
+        putJsonObject("properties") { put("say", str(desc)) }
         putJsonArray("required") { add("say") }
     }
 
@@ -72,7 +72,8 @@ object TurnSchemas {
             }
             putJsonArray("required") { add("say"); add("quickReplies"); add("readyToDraft") }
         }
-        SessionMode.ADVICE, SessionMode.FREE -> sayOnly
+        SessionMode.ADVICE -> sayOnly("조언 본문. 마크다운 없이 줄바꿈만, 800자 안팎")
+        SessionMode.FREE -> sayOnly("답 본문. 제목·목록·굵게 같은 간단한 마크다운을 써도 된다")
     }
 
     private val writeTools = listOf(
