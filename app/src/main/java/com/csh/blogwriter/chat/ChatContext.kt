@@ -26,7 +26,7 @@ data class ChatContext(
 )
 
 sealed interface TurnResult {
-    data class Success(val response: TurnResponse, val repairs: List<String>, val usedModel: String) : TurnResult
+    data class Success(val response: TurnResponse, val repairs: List<String>, val usedModel: String, val thought: String? = null) : TurnResult
     data class Failure(val reason: Reason, val retryAt: Long? = null, val detail: String = "") : TurnResult
     enum class Reason { NO_KEY, RATE_LIMITED, NETWORK, SERVER, BAD_RESPONSE, OTHER }
 }
@@ -41,6 +41,8 @@ interface TurnListener {
      * 시작될 때마다 보내는 빈 문자열("")은 "지금까지 보여 준 것을 지우라"는 뜻이다 — 값은 줄어들 수 있다.
      */
     fun onPartialSay(text: String)
+    /** 지금까지의 생각 요약 전체(교체). 새 시도(attempt)마다 "" 로 초기화. */
+    fun onPartialThought(text: String) {}
     /** 조언 도구가 글 본문을 읽었을 때 — 오른쪽 패널을 그 글로 연다. */
     fun onPostRead(logNo: String, title: String) {}
 }

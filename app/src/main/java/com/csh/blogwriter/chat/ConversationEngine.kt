@@ -187,6 +187,9 @@ class ConversationEngine(
         var temperature = policy.temperature
         var jsonRetry = false
         var toolRounds = 0
+        // 도구 라운드·온도 0 재시도를 거치며 이어 붙일 생각 요약 — 새 시도(attempt)마다 ""부터.
+        var thoughtAll = ""
+        listener.onPartialThought("")
         // 매 반복은 성공 반환·예외·(도구 라운드 | JSON 재시도) 중 하나 — 둘 다 상한이 있어 루프는 끝난다.
         while (true) {
             val req = GRequest(
@@ -210,7 +213,12 @@ class ConversationEngine(
             // 새 스트림은 처음부터 다시 쌓인다 — UI 가 이전 접두를 지우도록 빈 문자열을 먼저 보낸다.
             var lastPartial: String? = ""
             listener.onPartialSay("")
+            var roundThought = ""
             client.generateStream(secret, model, req).collect { chunk ->
+                chunk.thoughtText?.let { piece ->
+                    roundThought += piece
+                    listener.onPartialThought(joinThoughts(thoughtAll, roundThought))
+                }
                 chunk.text?.let { text += it }
                 calls += chunk.functionCalls
                 callParts += chunk.candidates.firstOrNull()?.content?.parts.orEmpty().filter { it.functionCall != null }
@@ -219,6 +227,7 @@ class ConversationEngine(
                     if (partial != lastPartial) { lastPartial = partial; listener.onPartialSay(partial) }
                 }
             }
+            if (roundThought.isNotEmpty()) thoughtAll = joinThoughts(thoughtAll, roundThought)
 
             if (calls.isNotEmpty()) {
                 if (++toolRounds > MAX_TOOL_ROUNDS) throw BadResponse("도구 호출이 너무 많습니다")
@@ -243,9 +252,12 @@ class ConversationEngine(
                 throw BadResponse("JSON 해석 실패: ${it.message}")
             }
             val repaired = parsed.post?.let { PostContentRepair.repair(it, attachedRefs, userGroups) }
-            return TurnResult.Success(if (repaired != null) parsed.copy(post = repaired.content) else parsed, repaired?.fixes ?: emptyList(), model)
+            return TurnResult.Success(if (repaired != null) parsed.copy(post = repaired.content) else parsed, repaired?.fixes ?: emptyList(), model, thought = thoughtAll.ifBlank { null })
         }
     }
+
+    /** 도구 라운드가 이어질 때 생각 요약을 빈 줄로 잇는다. */
+    private fun joinThoughts(prev: String, next: String) = if (prev.isEmpty()) next else if (next.isEmpty()) prev else prev + "\n\n" + next
 
     /** 도구는 throw 하지 않기로 약속돼 있지만, 어겨도 턴을 죽이지 않고 오류 JSON 으로 모델에 돌려준다. */
     private suspend fun runTool(tools: ToolExecutor, call: GFunctionCall, listener: TurnListener): JsonObject =

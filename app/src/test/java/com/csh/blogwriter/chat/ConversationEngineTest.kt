@@ -82,6 +82,8 @@ class ConversationEngineTest {
         override fun onPartialSay(text: String) { partials += text }
     }
 
+    private fun thoughtChunk(text: String) = """{"candidates":[{"content":{"role":"model","parts":[{"text":${quote(text)},"thought":true}]}}]}"""
+
     private var now = 0L
     private lateinit var engine: ConversationEngine
 
@@ -462,5 +464,36 @@ class ConversationEngineTest {
         // 조언 턴에는 사실 확인·계획 지시가 붙지 않는다.
         val userTexts = first["contents"]!!.jsonArray.flatMap { it.jsonObject["parts"]!!.jsonArray }.mapNotNull { it.jsonObject["text"]?.jsonPrimitive?.content }
         assertFalse(userTexts.any { it.contains("plan 을") })
+    }
+
+    // ---- 생각(thought) 요약 ----
+
+    @Test
+    fun thoughtPartsStreamSeparatelyAndAreReturned() = runTest {
+        server.enqueue(sse(thoughtChunk("**Plan** "), thoughtChunk("think"), chunk("""{"say":"이렇게"""), chunk(""" 써 볼까요?","quickReplies":[],"readyToDraft":false}""")))
+        val thoughts = mutableListOf<String>(); val says = mutableListOf<String>()
+        val listener = object : TurnListener {
+            override fun onToolStatus(text: String) {}
+            override fun onPartialSay(text: String) { says += text }
+            override fun onPartialThought(text: String) { thoughts += text }
+        }
+        val r = engine().runTurn(ctx(), listener) as TurnResult.Success
+        assertEquals("이렇게 써 볼까요?", r.response.say)
+        assertEquals("**Plan** think", r.thought)
+        assertEquals(listOf("", "**Plan** ", "**Plan** think"), thoughts)   // 시도 시작의 "" 다음 누적
+        assertFalse(says.any { it.contains("Plan") })
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(body.contains("\"includeThoughts\":true"))
+    }
+
+    @Test
+    fun thoughtsAccumulateAcrossToolRounds() = runTest {
+        server.enqueue(sse(thoughtChunk("first"), callChunk))
+        server.enqueue(sse(thoughtChunk("second"), chunk("""{"say":"끝","quickReplies":[],"readyToDraft":false}""")))
+        val thoughts = mutableListOf<String>()
+        val listener = object : TurnListener { override fun onToolStatus(text: String) {}; override fun onPartialSay(text: String) {}; override fun onPartialThought(text: String) { thoughts += text } }
+        val r = engine().runTurn(ctx(), listener) as TurnResult.Success
+        assertEquals("first\n\nsecond", r.thought)
+        assertEquals("first\n\nsecond", thoughts.last())
     }
 }
