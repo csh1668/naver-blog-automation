@@ -1397,4 +1397,19 @@ class ChatViewModelTest {
         vm.toggleStreamingThought(); assertTrue(vm.uiState.value.thoughtCollapsed)
         vm.toggleStreamingThought(); assertFalse(vm.uiState.value.thoughtCollapsed)
     }
+
+    @Test
+    fun adviceKeepsStyleMemoryButFreeDropsIt() = runTest {
+        turns += say("네"); turns += say("네")
+        val vm = newViewModel()
+        vm.openInitial(null); advanceUntilIdle()
+        vm.setMode(SessionMode.ADVICE)
+        vm.send("최근 글 봐 줘"); advanceUntilIdle()
+        assertEquals("존댓말로 써요", contexts.last().style)     // 조언은 말투를 출발점으로 함께 보낸다
+
+        vm.open(null); advanceUntilIdle()
+        vm.setMode(SessionMode.FREE)
+        vm.send("안녕"); advanceUntilIdle()
+        assertNull(contexts.last().style)
+    }
 }

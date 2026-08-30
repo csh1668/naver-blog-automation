@@ -95,6 +95,8 @@ class ChatViewModel @Inject constructor(
         private val DRAFT_WORDS = Regex("초안|써 줘|작성해")
         /** 사진을 붙일 수 있는 모드 — 글쓰기와 자유. */
         val PHOTO_MODES = setOf(SessionMode.WRITE, SessionMode.FREE)
+        /** 말투 기억을 함께 보내는 모드 — 조언도 "출발점"으로 쓴다. 자유 대화는 말투에 매이지 않는다. */
+        val STYLE_MODES = setOf(SessionMode.WRITE, SessionMode.ADVICE)
     }
 
     private val _uiState = MutableStateFlow(ChatUiState())
@@ -571,7 +573,7 @@ class ChatViewModel @Inject constructor(
     private suspend fun context(session: ChatSession, draftTurn: Boolean): ChatContext {
         val all = chatRepo.messagesOnce(session.id)
         val history = all.filterNot { it.role == MessageRole.SYSTEM || it.kind == MessageKind.SYSTEM }
-        // 조언·자유 세션은 계획·초안·말투를 쓰지 않는다 — 프롬프트에도 실어 보내지 않는다(자유는 사진만 받는다).
+        // 조언·자유 세션은 계획·초안을 쓰지 않는다 — 프롬프트에도 실어 보내지 않는다(자유는 사진만 받는다).
         val write = session.mode == SessionMode.WRITE
         val style = memory.activeItems()
             .filter { it.kind == MemoryKind.STYLE }
@@ -581,7 +583,7 @@ class ChatViewModel @Inject constructor(
             history = history,
             attachments = if (session.mode in PHOTO_MODES) photoAttachments.attachments(session.id, _uiState.value.attachments) else emptyList(),
             photoGroups = if (write) _uiState.value.photoGroups else emptyList(),
-            style = if (write) style else null,
+            style = if (session.mode in STYLE_MODES) style else null,
             draftTurn = draftTurn,
             // 초안이 나오기 전까지는 계획을 함께 보낸다 — 모델이 "이 계획을 고쳐라"로 읽는다.
             currentPlan = if (write && _uiState.value.panelJobId == null) lastPlan(history) else null,
