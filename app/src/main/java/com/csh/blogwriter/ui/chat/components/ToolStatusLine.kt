@@ -27,7 +27,7 @@ import com.csh.blogwriter.ui.theme.AppTheme
 
 /** 생각 중 표시: 점 세 개가 차례로 밝아지고, 도구를 쓰는 중이면 그 문구를 옆에 보여 준다. */
 @Composable
-fun ToolStatusLine(toolStatus: String?) {
+fun ToolStatusLine(toolStatus: String?, fallback: String = "글을 구상하고 있어요") {
     val transition = rememberInfiniteTransition(label = "thinking")
     Row(
         Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm),
@@ -49,7 +49,7 @@ fun ToolStatusLine(toolStatus: String?) {
         }
         Spacer(Modifier.width(AppSpacing.sm))
         Text(
-            toolStatus ?: "글을 구상하고 있어요",
+            toolStatus ?: fallback,
             style = AppTheme.typography.caption,
             color = AppTheme.colors.textSecondary,
         )

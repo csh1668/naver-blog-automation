@@ -127,8 +127,8 @@ class ConversationEngine(
                     GeminiException.Kind.RATE_LIMITED -> { rot.report(pick, KeyRotator.Outcome.RATE_LIMITED); keyStore.markLimited(pick.keyId) }
                     GeminiException.Kind.INVALID_KEY -> { rot.report(pick, KeyRotator.Outcome.INVALID_KEY); keyStore.markInvalid(pick.keyId) }
                     GeminiException.Kind.BAD_REQUEST -> when {
-                        // 400 이 thinking 을 가리키면 이 필드를 안 받아 주는 모델 — 빼고 같은 pick 으로 한 번 더(시도 횟수 미차감).
-                        e.code == 400 && useThinking && lastDetail.contains("thinking", ignoreCase = true) ->
+                        // 400 이 thinking/thought(includeThoughts) 를 가리키면 이 필드를 안 받아 주는 모델 — 빼고 같은 pick 으로 한 번 더(시도 횟수 미차감).
+                        e.code == 400 && useThinking && (lastDetail.contains("thinking", ignoreCase = true) || lastDetail.contains("thought", ignoreCase = true)) ->
                             { useThinking = false; attempts-- }
                         // 400 이고 스키마를 보냈다면 스키마를 안 받아 주는 모델 — 스키마 없이 같은 pick 으로 한 번 더(시도 횟수 미차감).
                         e.code == 400 && useSchema -> { useSchema = false; attempts-- }

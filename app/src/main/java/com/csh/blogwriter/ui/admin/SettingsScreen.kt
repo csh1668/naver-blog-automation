@@ -85,7 +85,8 @@ class SettingsViewModel @Inject constructor(
 
     fun checkForUpdate() = viewModelScope.launch {
         _updateCheck.value = UpdateCheckState.Checking
-        val info = try { updateChecker.checkForUpdate() } catch (e: CancellationException) { throw e } catch (e: Exception) { _updateCheck.value = UpdateCheckState.Failed; return@launch }
+        val result = try { updateChecker.check() } catch (e: CancellationException) { throw e } catch (e: Exception) { _updateCheck.value = UpdateCheckState.Failed; return@launch }
+        val info = result.getOrElse { _updateCheck.value = UpdateCheckState.Failed; return@launch }
         if (info == null) { _updateCheck.value = UpdateCheckState.UpToDate(BuildConfig.VERSION_NAME); return@launch }
         // 수동으로 찾은 새 버전은 채팅 배너로도 보이게 — 닫아 둔 태그를 풀고 10분 간격도 무시한다.
         settings.setDismissedUpdateTag(null); settings.setLastUpdateCheckAt(0L)

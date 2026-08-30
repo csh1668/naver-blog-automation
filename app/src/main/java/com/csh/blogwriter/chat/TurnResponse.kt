@@ -15,11 +15,15 @@ import kotlinx.serialization.json.Json
 )
 
 object TurnResponseJson {
+    private val LITERAL_NEWLINE = """\n"""
     private val json = Json { ignoreUnknownKeys = true; classDiscriminator = "type"; coerceInputValues = true; isLenient = true }
     fun decode(text: String): TurnResponse {
         val start = text.indexOf('{'); val end = text.lastIndexOf('}')
         require(start >= 0 && end > start) { "JSON 객체를 찾지 못했습니다" }
-        return json.decodeFromString(TurnResponse.serializer(), text.substring(start, end + 1))
+        val t = json.decodeFromString(TurnResponse.serializer(), text.substring(start, end + 1))
+        // 모델이 줄바꿈을 이중으로 이스케이프해 보내는 일이 있다 — 채팅 글에 백슬래시 n 이 글자로 남을 일은 없으니 풀어 준다.
+        return t.copy(say = unescapeNewlines(t.say), plan = t.plan?.let(::unescapeNewlines), question = t.question?.let(::unescapeNewlines))
     }
+    private fun unescapeNewlines(text: String): String = text.replace(LITERAL_NEWLINE, "\n")
     fun encode(t: TurnResponse): String = json.encodeToString(TurnResponse.serializer(), t)
 }

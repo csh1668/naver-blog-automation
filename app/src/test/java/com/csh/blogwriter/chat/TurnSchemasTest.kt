@@ -33,4 +33,10 @@ class TurnSchemasTest {
         assertEquals("조언 본문. 마크다운 없이 줄바꿈만, 800자 안팎", advice["properties"]!!.jsonObject["say"]!!.jsonObject["description"]!!.jsonPrimitive.content)
         assertTrue(free["properties"]!!.jsonObject["say"]!!.jsonObject["description"]!!.jsonPrimitive.content.contains("마크다운"))
     }
+    @Test fun rememberDescriptionAsksFirstOnlyInFreeMode() {
+        val free = TurnSchemas.functionDeclarations(SessionMode.FREE).single { it.name == "remember" }.description
+        val write = TurnSchemas.functionDeclarations().single { it.name == "remember" }.description
+        assertTrue(free.contains("동의한 뒤"))
+        assertTrue(!write.contains("동의한 뒤"))
+    }
 }

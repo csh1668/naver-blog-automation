@@ -8,6 +8,7 @@ import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.util.concurrent.TimeUnit
@@ -76,6 +77,29 @@ class UpdateCheckerTest {
         val result = checker().checkForUpdate(repo = "o/r", currentVersion = "1.0.0")
 
         assertNull(result)
+    }
+
+    /** 서버가 5xx 면 "최신 버전"이 아니라 실패다 — 설정 화면이 둘을 구분해 보여 준다. */
+    @Test
+    fun serverErrorIsFailure() = runTest {
+        server.enqueue(MockResponse().setResponseCode(500))
+
+        val result = checker().check(repo = "o/r", currentVersion = "1.0.0")
+
+        assertTrue(result.isFailure)
+    }
+
+    @Test
+    fun olderReleaseIsSuccessWithNull() = runTest {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("""{"tag_name":"v0.9.0","html_url":"https://github.com/o/r/releases/tag/v0.9.0"}"""),
+        )
+
+        val result = checker().check(repo = "o/r", currentVersion = "1.0.0")
+
+        assertEquals(Result.success(null), result)
     }
 
     @Test

@@ -54,4 +54,16 @@ class TurnResponseTest {
         assertEquals("전화", table.rows[1][0])
         assertTrue(com.csh.blogwriter.domain.model.PostContentJson.encode(post).contains("\"type\":\"table\""))
     }
+    /** 모델이 줄바꿈을 이중으로 이스케이프해 보내면 백슬래시 n 이 화면에 그대로 보인다 — 진짜 줄바꿈으로 푼다. */
+    @Test
+    fun literalBackslashNBecomesNewline() {
+        val t = TurnResponseJson.decode("""{"say":"첫 줄\\n둘째 줄","quickReplies":[],"readyToDraft":false}""")
+        assertEquals("첫 줄\n둘째 줄", t.say)
+    }
+
+    @Test
+    fun normalNewlineEscapeStillDecodes() {
+        val t = TurnResponseJson.decode("""{"say":"첫 줄\n둘째 줄","quickReplies":[],"readyToDraft":false}""")
+        assertEquals("첫 줄\n둘째 줄", t.say)
+    }
 }

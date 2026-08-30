@@ -104,8 +104,10 @@ fun ModelsScreen(onBack: () -> Unit, viewModel: ModelsViewModel = hiltViewModel(
 private fun ModelDropdownField(value: String, onValueChange: (String) -> Unit, label: String, options: List<String>) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val c = AppTheme.colors
+    // 이미 고른 모델 이름이 그대로 들어 있으면 그 한 줄만 남아 목록이 안 보인다 — 직접 입력해 좁히는 중일 때만 거른다.
     val filtered = remember(value, options) {
-        if (value.isBlank()) options else options.filter { it.contains(value, ignoreCase = true) }
+        if (value.isBlank() || options.any { it.equals(value, ignoreCase = true) }) options
+        else options.filter { it.contains(value, ignoreCase = true) }
     }
 
     Column {

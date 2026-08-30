@@ -407,6 +407,21 @@ class ConversationEngineTest {
         assertTrue(second.contains("responseJsonSchema"))
     }
 
+    /** includeThoughts 를 짚어 400 을 내는 모델도 같은 폴백 — "thought" 만 들어가도 생각 설정을 뺀다. */
+    @Test
+    fun includeThoughtsRejectionRetriesWithoutThinkingConfig() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(400)
+                .setBody("""{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"includeThoughts is not supported for this model"}}""")
+        )
+        server.enqueue(textResponse("""{"say":"초안이에요","readyToDraft":true}"""))
+        val r = engine.runTurn(ctx(draft = true), Recorder()) as TurnResult.Success
+        assertEquals("초안이에요", r.response.say)
+        assertEquals(2, server.requestCount)
+        assertTrue(server.takeRequest().body.readUtf8().contains("thinkingConfig"))
+        assertFalse(server.takeRequest().body.readUtf8().contains("thinkingConfig"))
+    }
+
     /** 사용자가 묶어 둔 사진은 요청에 한 줄로 실리고, 초안 보정에도 그대로 넘어간다. */
     @Test
     fun userPhotoGroupsGoIntoTheRequestAndTheRepair() = runTest {

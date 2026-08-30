@@ -129,6 +129,8 @@ fun ChatScreen(
     val sessions by viewModel.sessions.collectAsStateWithLifecycle()
     // 회전으로 화면이 다시 만들어져도 보던 대화를 그대로 둔다 — 뷰모델이 첫 진입만 받는다.
     LaunchedEffect(sessionId) { viewModel.openInitial(sessionId) }
+    // 설정에서 새 버전을 찾고 돌아오면 여기로 다시 들어온다 — 그때 배너를 다시 무장한다.
+    LaunchedEffect(Unit) { viewModel.checkUpdateIfDue() }
 
     // 패널을 한 번 연 뒤에는 접어도 컴포지션에 남겨 둔다 — 빠지면 WebView 가 파괴돼 처음부터 다시 올려야 한다.
     // 대화를 바꾸면 처음부터 다시 센다: 안 그러면 이어 쓰던 글이 있는 대화를 열자마자
@@ -404,7 +406,7 @@ private fun ChatPane(
                 items(ui.messages, key = { it.id }) { message -> MessageItem(message, ui.mode, ui.panelOpen, viewModel) }
                 ui.streamingThought?.let { thought -> item(key = "streaming-thought") { ThoughtBlock(thought, expanded = !ui.thoughtCollapsed, onToggle = viewModel::toggleStreamingThought) } }
                 ui.streamingSay?.let { partial -> item { MessageBubble(partial, mine = false) } }
-                if (ui.thinking) item { ToolStatusLine(ui.toolStatus) }
+                if (ui.thinking) item { ToolStatusLine(ui.toolStatus, fallback = when (ui.mode) { SessionMode.WRITE -> "글을 구상하고 있어요"; SessionMode.ADVICE -> "글을 읽고 있어요"; SessionMode.FREE -> "생각하고 있어요" }) }
             }
             ui.draftGate?.let { gate -> DraftGateCard(gate, viewModel) }
             QuickReplyChips(ui.quickReplies) { justSent = true; viewModel.sendQuickReply(it) }

@@ -55,7 +55,7 @@ class SettingsViewModelTest {
 
     /** 새 버전 확인기. [result] 를 돌려주거나 없으면 그대로 최신. */
     private class FakeUpdateChecker(private val result: UpdateInfo?) : UpdateChecker {
-        override suspend fun checkForUpdate(repo: String, currentVersion: String): UpdateInfo? = result
+        override suspend fun check(repo: String, currentVersion: String): Result<UpdateInfo?> = Result.success(result)
     }
 
     private val settings = FakeSettingsStore()
@@ -84,7 +84,7 @@ class SettingsViewModelTest {
     }
 
     @Test fun checkFailureIsReported() = runTest {
-        val vm = newViewModel(checker = object : UpdateChecker { override suspend fun checkForUpdate(repo: String, currentVersion: String): UpdateInfo? = throw java.io.IOException("offline") })
+        val vm = newViewModel(checker = object : UpdateChecker { override suspend fun check(repo: String, currentVersion: String): Result<UpdateInfo?> = Result.failure(java.io.IOException("offline")) })
         backgroundScope.launch { vm.uiState.collect {} }
         vm.checkForUpdate(); advanceUntilIdle()
         assertEquals(UpdateCheckState.Failed, vm.uiState.value.updateCheck)

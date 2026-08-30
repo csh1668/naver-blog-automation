@@ -173,9 +173,9 @@ class ChatViewModelTest {
     private class FakeUpdateChecker(private val result: UpdateInfo?) : UpdateChecker {
         var callCount = 0
             private set
-        override suspend fun checkForUpdate(repo: String, currentVersion: String): UpdateInfo? {
+        override suspend fun check(repo: String, currentVersion: String): Result<UpdateInfo?> {
             callCount++
-            return result
+            return Result.success(result)
         }
     }
 
@@ -379,6 +379,24 @@ class ChatViewModelTest {
 
         assertNull(vm.updateInfo.value)
         assertEquals("v9.9.9", settings.dismissedTag.value)
+    }
+
+    /** 설정에서 새 버전을 찾고 돌아오면 화면이 다시 물어본다 — init 한 번으로 끝나면 배너가 영영 안 뜬다. */
+    @Test
+    fun checkUpdateIfDueRearmsWhenReturningFromSettings() = runTest {
+        settings.lastCheckAt.value = 0L
+        val checker = FakeUpdateChecker(UpdateInfo("v9.9.9", "https://example.com"))
+
+        val vm = newViewModel(checker = checker)
+        advanceUntilIdle()
+        vm.dismissUpdate(); advanceUntilIdle()
+        settings.dismissedTag.value = null
+        settings.lastCheckAt.value = 0L
+
+        vm.checkUpdateIfDue(); advanceUntilIdle()
+
+        assertEquals(2, checker.callCount)
+        assertEquals(UpdateInfo("v9.9.9", "https://example.com"), vm.updateInfo.value)
     }
 
     @Test
@@ -1379,6 +1397,24 @@ class ChatViewModelTest {
         assertNull(vm.uiState.value.streamingThought); assertFalse(vm.uiState.value.thoughtCollapsed)
         val last = chatRepo.of(chatRepo.sessions.value.single().id).last { it.role == MessageRole.ASSISTANT }
         assertEquals("**Plan** think", ChatPayloads.readThought(last.payloadJson)); assertEquals("답", ChatPayloads.readText(last.payloadJson))
+    }
+
+    /** 재시도로 새 attempt 가 시작되면(빈 생각) 접힘도 풀어야 한다 — 안 그러면 새 생각이 한 줄로 갇힌다. */
+    @Test
+    fun newAttemptReopensCollapsedThought() = runTest {
+        turns += say("답", thought = "생각")
+        partials = emptyList()
+        val seen = mutableListOf<Boolean>()
+        val vm = newViewModel()
+        vm.openInitial(null); advanceUntilIdle()
+        vm.setMode(SessionMode.FREE)
+        onTurn = { l ->
+            l.onPartialThought("생각")
+            l.onPartialSay("답"); seen += vm.uiState.value.thoughtCollapsed
+            l.onPartialThought(""); seen += vm.uiState.value.thoughtCollapsed
+        }
+        vm.send("질문"); advanceUntilIdle()
+        assertEquals(listOf(true, false), seen)
     }
 
     @Test

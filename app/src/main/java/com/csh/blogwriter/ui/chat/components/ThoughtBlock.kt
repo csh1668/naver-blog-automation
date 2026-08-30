@@ -23,7 +23,8 @@ fun ThoughtBlock(text: String, expanded: Boolean, onToggle: () -> Unit) {
         contentAlignment = Alignment.CenterStart,
     ) {
         Text(
-            text.trim(),
+            // 생각 요약은 영어 마크다운으로 온다 — 굵게 표시만 떼어 내고 그대로 보여 준다.
+            text.replace("**", "").trim(),
             style = AppTheme.typography.caption, color = c.textTertiary,
             maxLines = if (expanded) Int.MAX_VALUE else 1, overflow = TextOverflow.Ellipsis,
         )

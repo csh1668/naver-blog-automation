@@ -81,14 +81,21 @@ object TurnSchemas {
             buildJsonObject { put("type", "object"); putJsonObject("properties") { put("query", str("검색어")) }; putJsonArray("required") { add("query") } }),
         GFunctionDeclaration("open_page", "웹 페이지를 열어 본문 텍스트(최대 4000자)를 돌려준다. web_search 결과의 url만 연다.",
             buildJsonObject { put("type", "object"); putJsonObject("properties") { put("url", str("http(s) 주소")) }; putJsonArray("required") { add("url") } }),
-        GFunctionDeclaration("remember", "사용자의 취향·습관·자주 쓰는 표현·사실을 저장한다. 저장 후 say에 '기억해 둘게요: …' 로 알린다.",
-            buildJsonObject { put("type", "object"); putJsonObject("properties") {
-                put("kind", buildJsonObject { put("type", "string"); putJsonArray("enum") { add("STYLE"); add("PREFERENCE"); add("FACT"); add("EXPRESSION") } }); put("text", str("한 문장"))
-            }; putJsonArray("required") { add("kind"); add("text") } }),
+        rememberTool("사용자의 취향·습관·자주 쓰는 표현·사실을 저장한다. 저장 후 say에 '기억해 둘게요: …' 로 알린다."),
     )
 
+    // 자유 모드 프롬프트는 "기억할까요?" 를 먼저 묻게 돼 있다 — 도구 설명도 그 순서에 맞춘다.
+    private val freeTools = writeTools.filterNot { it.name == "remember" } +
+        rememberTool("사용자의 취향·습관·자주 쓰는 표현·사실을 저장한다. 사용자가 기억해 달라고 했거나 '기억할까요?' 제안에 동의한 뒤에만 부른다. 저장 후 say에 '기억해 둘게요: …' 로 알린다.")
+
+    private fun rememberTool(description: String) = GFunctionDeclaration("remember", description,
+        buildJsonObject { put("type", "object"); putJsonObject("properties") {
+            put("kind", buildJsonObject { put("type", "string"); putJsonArray("enum") { add("STYLE"); add("PREFERENCE"); add("FACT"); add("EXPRESSION") } }); put("text", str("한 문장"))
+        }; putJsonArray("required") { add("kind"); add("text") } })
+
     fun functionDeclarations(mode: SessionMode = SessionMode.WRITE): List<GFunctionDeclaration> = when (mode) {
-        SessionMode.WRITE, SessionMode.FREE -> writeTools
+        SessionMode.WRITE -> writeTools
+        SessionMode.FREE -> freeTools
         SessionMode.ADVICE -> listOf(
             GFunctionDeclaration("list_my_posts", "사용자 블로그의 최근 글 30개(logNo·제목·날짜·댓글·공감·사진 수·요약)를 돌려준다. 시스템 프롬프트의 목록이 없거나 오래됐을 때만 부른다.",
                 buildJsonObject { put("type", "object"); putJsonObject("properties") {} }),

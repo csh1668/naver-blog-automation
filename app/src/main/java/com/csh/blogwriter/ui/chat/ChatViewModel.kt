@@ -128,6 +128,11 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             settings.blogId.collect { id -> _uiState.update { it.copy(loggedIn = id != null, blogId = id) } }
         }
+        checkUpdateIfDue()
+    }
+
+    /** 화면이 붙을 때마다 부른다 — 설정에서 새 버전을 찾고 돌아와도 배너가 뜨게. 10분 안의 연속 호출은 건너뛴다. */
+    fun checkUpdateIfDue() {
         viewModelScope.launch {
             val now = System.currentTimeMillis()
             if (now - settings.lastUpdateCheckAtOnce() < UPDATE_CHECK_INTERVAL_MS) return@launch
@@ -558,7 +563,8 @@ class ChatViewModel @Inject constructor(
     private fun listenerFor(sessionId: String) = object : TurnListener {
         override fun onToolStatus(text: String) = _uiState.update { it.copy(toolStatus = text) }
         // 값은 늘 "지금까지의 전체 접두" 다 — 이어붙이지 않고 교체한다. 빈 문자열은 지우라는 뜻.
-        override fun onPartialThought(text: String) { if (isCurrent(sessionId)) _uiState.update { it.copy(streamingThought = text.ifEmpty { null }) } }
+        // 빈 값은 새 attempt 라는 뜻이라 접힘도 함께 푼다 — 안 그러면 새 생각이 한 줄로 갇힌다.
+        override fun onPartialThought(text: String) { if (isCurrent(sessionId)) _uiState.update { it.copy(streamingThought = text.ifEmpty { null }, thoughtCollapsed = if (text.isEmpty()) false else it.thoughtCollapsed) } }
         // 답이 오기 시작하면 생각은 접는다 — 한 번 접히면 턴이 끝날 때까지 다시 펴지지 않는다(사용자가 탭하면 예외).
         override fun onPartialSay(text: String) { if (isCurrent(sessionId)) _uiState.update { it.copy(streamingSay = text.ifEmpty { null }, thoughtCollapsed = it.thoughtCollapsed || text.isNotEmpty()) } }
         // 조언 도구가 글을 읽으면 오른쪽을 그 글로 연다. 대화에도 남겨 다시 열 때 되살린다.
@@ -589,7 +595,7 @@ class ChatViewModel @Inject constructor(
             currentPlan = if (write && _uiState.value.panelJobId == null) lastPlan(history) else null,
             // 재주입 조건과 같아야 한다 — 패널을 접어 두고 "문단 2를 더 짧게" 라고 해도 지금 초안을 함께 보낸다.
             currentPost = if (write && _uiState.value.panelJobId != null) lastPost(history) else null,
-            questionRounds = if (write) questionRounds(history) else 0,
+            questionRounds = questionRounds(history),
             mode = session.mode,
             blogPosts = all.lastOrNull { it.kind == MessageKind.BLOG_POSTS }?.let { ChatPayloads.readBlogPosts(it.payloadJson) },
         )
