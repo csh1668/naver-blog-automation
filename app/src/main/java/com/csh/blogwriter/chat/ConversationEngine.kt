@@ -59,6 +59,32 @@ class ConversationEngine(
         const val USER_GROUP = "사용자가 묶어 둔 사진: "
         /** 질문 횟수를 다 쓴 턴에 붙인다. */
         const val STOP_ASKING = "더 묻지 말고 지금 있는 정보로 plan 을 내세요. 모르는 값은 검색해서 채우거나 '(확인 필요)' 로 표시하세요."
+
+        /** 생각 흐름에 끼워 넣는 도구 한 줄. 사용자 문구라 기술 용어 없이, 결과 크기와 실패 이유만 짧게. */
+        fun toolLine(call: GFunctionCall, result: JsonObject): String {
+            fun arg(key: String) = call.args[key]?.jsonPrimitive?.content.orEmpty()
+            val error = result["error"]?.jsonPrimitive?.content
+            val what = when (call.name) {
+                "web_search" -> "검색 \"${arg("query")}\""
+                "open_page" -> "페이지 열기 " + (runCatching { java.net.URI(arg("url")).host }.getOrNull() ?: arg("url"))
+                "read_my_post" -> "내 글 읽기" + (result["title"]?.jsonPrimitive?.content?.let { " \"$it\"" } ?: "")
+                "list_my_posts" -> "최근 글 목록"
+                "remember" -> "기억 저장 \"${arg("text")}\""
+                else -> call.name
+            }
+            val tail = when {
+                error == "limit" -> " → 이번 턴 한도 초과"
+                error == "not_allowed" -> " → 검색 결과에 없는 주소"
+                error == "not_logged_in" -> " → 로그인 필요"
+                error == "disabled" -> " → 꺼져 있음"
+                error != null -> " → 실패: $error"
+                call.name == "web_search" -> (result["results"] as? kotlinx.serialization.json.JsonArray)?.let { " → 결과 ${it.size}건" } ?: ""
+                call.name == "open_page" -> result["text"]?.jsonPrimitive?.content?.let { " → ${it.length}자" } ?: ""
+                call.name == "list_my_posts" -> (result["posts"] as? kotlinx.serialization.json.JsonArray)?.let { " → ${it.size}개" } ?: ""
+                else -> ""
+            }
+            return "▸ $what$tail"
+        }
     }
 
     /** 싱글턴이라 여러 화면에서 동시에 들어올 수 있다 — 로테이터 재사용/재생성은 잠금 안에서. */
@@ -239,6 +265,9 @@ class ConversationEngine(
                             listener.onPostRead(result["logNo"]?.jsonPrimitive?.content ?: call.args["logNo"]?.jsonPrimitive?.content.orEmpty(), title)
                         }
                     }
+                    // 도구를 쓴 자리를 생각 흐름 사이에 한 줄로 남긴다 — 무엇을 찾아봤고 무엇이 막혔는지 사용자가 본다.
+                    thoughtAll = joinThoughts(thoughtAll, toolLine(call, result))
+                    listener.onPartialThought(thoughtAll)
                     GPart(functionResponse = GFunctionResponse(call.name, result))
                 })
                 continue
@@ -258,6 +287,7 @@ class ConversationEngine(
 
     /** 도구 라운드가 이어질 때 생각 요약을 빈 줄로 잇는다. */
     private fun joinThoughts(prev: String, next: String) = if (prev.isEmpty()) next else if (next.isEmpty()) prev else prev + "\n\n" + next
+
 
     /** 도구는 throw 하지 않기로 약속돼 있지만, 어겨도 턴을 죽이지 않고 오류 JSON 으로 모델에 돌려준다. */
     private suspend fun runTool(tools: ToolExecutor, call: GFunctionCall, listener: TurnListener): JsonObject =

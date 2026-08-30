@@ -11,6 +11,7 @@ import com.csh.blogwriter.data.repo.SessionMode
 import com.csh.blogwriter.domain.model.PostContent
 import com.csh.blogwriter.llm.ApiKey
 import com.csh.blogwriter.llm.ApiKeyStore
+import com.csh.blogwriter.llm.GFunctionCall
 import com.csh.blogwriter.llm.GeminiClient
 import com.csh.blogwriter.llm.KeyRotator
 import com.csh.blogwriter.llm.ModelPolicy
@@ -21,7 +22,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -534,7 +537,21 @@ class ConversationEngineTest {
         val thoughts = mutableListOf<String>()
         val listener = object : TurnListener { override fun onToolStatus(text: String) {}; override fun onPartialSay(text: String) {}; override fun onPartialThought(text: String) { thoughts += text } }
         val r = engine().runTurn(ctx(), listener) as TurnResult.Success
-        assertEquals("first\n\nsecond", r.thought)
-        assertEquals("first\n\nsecond", thoughts.last())
+        // 도구를 쓴 자리는 생각 사이에 한 줄로 끼워 넣는다 — 사용자가 "무엇을 찾아봤는지" 를 생각 흐름 속에서 본다.
+        assertEquals("first\n\n▸ 검색 \"원주 한우\"\n\nsecond", r.thought)
+        assertEquals("first\n\n▸ 검색 \"원주 한우\"\n\nsecond", thoughts.last())
+        assertTrue(thoughts.contains("first\n\n▸ 검색 \"원주 한우\""))
+    }
+
+    @Test
+    fun toolLinesDescribeResultsAndErrors() {
+        val ok = ConversationEngine.toolLine(GFunctionCall("web_search", buildJsonObject { put("query", "원주 한우") }), buildJsonObject { put("results", buildJsonArray { add(buildJsonObject { put("title", "a") }); add(buildJsonObject { put("title", "b") }) }) })
+        assertEquals("▸ 검색 \"원주 한우\" → 결과 2건", ok)
+        assertEquals("▸ 검색 \"원주 한우\" → 이번 턴 한도 초과", ConversationEngine.toolLine(GFunctionCall("web_search", buildJsonObject { put("query", "원주 한우") }), buildJsonObject { put("error", "limit") }))
+        assertEquals("▸ 페이지 열기 blog.naver.com → 13자", ConversationEngine.toolLine(GFunctionCall("open_page", buildJsonObject { put("url", "https://blog.naver.com/x/1") }), buildJsonObject { put("title", "t"); put("text", "본문 텍스트입니다 열두자") }))
+        assertEquals("▸ 내 글 읽기 \"원주 카페 늘봄\"", ConversationEngine.toolLine(GFunctionCall("read_my_post", buildJsonObject { put("logNo", "1") }), buildJsonObject { put("title", "원주 카페 늘봄"); put("text", "…") }))
+        assertEquals("▸ 최근 글 목록 → 3개", ConversationEngine.toolLine(GFunctionCall("list_my_posts"), buildJsonObject { put("posts", buildJsonArray { add(buildJsonObject {}); add(buildJsonObject {}); add(buildJsonObject {}) }) }))
+        assertEquals("▸ 기억 저장 \"가격은 정확히\"", ConversationEngine.toolLine(GFunctionCall("remember", buildJsonObject { put("kind", "PREFERENCE"); put("text", "가격은 정확히") }), buildJsonObject { put("saved", true) }))
+        assertEquals("▸ 검색 \"x\" → 실패: 네트워크", ConversationEngine.toolLine(GFunctionCall("web_search", buildJsonObject { put("query", "x") }), buildJsonObject { put("error", "네트워크") }))
     }
 }
