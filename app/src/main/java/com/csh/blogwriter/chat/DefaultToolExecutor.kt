@@ -24,7 +24,8 @@ class DefaultToolExecutor @Inject constructor(
     private val blog: BlogReader,
 ) : ToolExecutor {
     private val counts = HashMap<String, Int>()
-    private val limits = mapOf("web_search" to 2, "open_page" to 2, "remember" to 2, "list_my_posts" to 1, "read_my_post" to 3)
+    // 검색은 뉴스처럼 여러 번 파고들어야 하는 요청이 있어 넉넉히(사용자 결정 2026-08-30). 페이지 열기는 결과 페이지만 열므로 그대로.
+    private val limits = mapOf("web_search" to 8, "open_page" to 2, "remember" to 2, "list_my_posts" to 1, "read_my_post" to 3)
 
     /** 이번 턴 web_search 결과로 나온 url만 open_page 로 열 수 있다. */
     private val allowedUrls = mutableSetOf<String>()
@@ -35,7 +36,8 @@ class DefaultToolExecutor @Inject constructor(
         }
         val used = counts.getOrDefault(name, 0)
         val limit = limits[name] ?: return buildJsonObject { put("error", "unknown tool") }
-        if (used >= limit) return buildJsonObject { put("error", "limit") }
+        // 한도에 걸리면 모델이 없는 내용을 지어내지 않도록 다음 행동까지 일러 준다.
+        if (used >= limit) return buildJsonObject { put("error", "limit"); put("message", "이번 턴에 이 도구는 더 쓸 수 없어요. 지금까지 얻은 결과로만 답하고, 부족하면 못 찾았다고 말하세요.") }
         counts[name] = used + 1
         return try {
             when (name) {

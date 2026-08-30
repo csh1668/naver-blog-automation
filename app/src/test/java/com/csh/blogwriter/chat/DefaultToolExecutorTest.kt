@@ -60,9 +60,10 @@ class DefaultToolExecutorTest {
         val r = ex.execute("web_search", buildJsonObject { put("query", "원주 한우") }) { progress += it }
         assertEquals("원주 한우 맛집", r["results"]!!.jsonArray[0].jsonObject["title"]!!.jsonPrimitive.content)
         assertTrue(progress[0].contains("네이버에서 '원주 한우'"))
-        ex.execute("web_search", buildJsonObject { put("query", "b") }) {}
-        val third = ex.execute("web_search", buildJsonObject { put("query", "c") }) {}
-        assertEquals("limit", third["error"]!!.jsonPrimitive.content)
+        repeat(7) { ex.execute("web_search", buildJsonObject { put("query", "b$it") }) {} }
+        val ninth = ex.execute("web_search", buildJsonObject { put("query", "c") }) {}
+        assertEquals("limit", ninth["error"]!!.jsonPrimitive.content)
+        assertTrue(ninth["message"]!!.jsonPrimitive.content.contains("못 찾았다고"))
     }
 
     @Test

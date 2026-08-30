@@ -11,7 +11,11 @@ class PromptBuilder @Inject constructor(private val store: PromptStore) {
         const val MEMORY_CAP = 40
         const val NO_POSTS = "[최근 글 목록]\n(목록 없음 — 글 목록을 읽지 못했습니다. 사용자가 글을 지목하면 read_my_post 로 읽고, 목록이 필요하면 list_my_posts 를 부릅니다.)"
         private val DATE = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(java.time.ZoneId.of("Asia/Seoul"))
+        private val DAY = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd (E)", java.util.Locale.KOREA).withZone(java.time.ZoneId.of("Asia/Seoul"))
     }
+
+    /** 오늘 날짜 문자열. 모델은 오늘이 언제인지 모르므로 매 턴 알려 준다 — 테스트에서 바꿔 끼운다. */
+    internal var today: () -> String = { DAY.format(java.time.Instant.now()) }
 
     suspend fun system(memory: List<MemoryItem>, style: String?, targetLength: IntRange, draftTurn: Boolean, mode: SessionMode = SessionMode.WRITE): String {
         // STYLE 항목은 {{style}} 로 이미 들어간다 — 여기서 또 넣으면 같은 문장이 프롬프트에 두 번 실린다.
@@ -31,7 +35,8 @@ class PromptBuilder @Inject constructor(private val store: PromptStore) {
             SessionMode.FREE -> listOf(store.text(PromptSection.FREE_ROLE), memorySection, store.text(PromptSection.FREE_MEMORY))
         }
         // 길이 자리표시자는 어느 섹션에 있든(구조·자기점검·관리자가 편집한 곳) 모두 채운다.
-        return sections.joinToString("\n\n")
+        val todayLine = "[오늘] ${today()} 한국 시간. 오늘·최근·이번 주처럼 날짜가 걸린 말은 이 날짜를 기준으로 봅니다."
+        return (listOf(todayLine) + sections).joinToString("\n\n")
             .replace("{{minLen}}", targetLength.first.toString())
             .replace("{{maxLen}}", targetLength.last.toString())
     }

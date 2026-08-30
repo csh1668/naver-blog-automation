@@ -30,6 +30,15 @@ class PromptBuilderTest {
     private fun mem(i: Int, kind: MemoryKind = MemoryKind.PREFERENCE) = MemoryItem(i.toLong(), kind, "항목$i", "chat", i.toLong(), true, null)
 
     @Test
+    fun everyModeStartsWithTodayLine() = runTest {
+        val b = PromptBuilder(store).apply { today = { "2026-08-30 (일)" } }
+        for (mode in SessionMode.entries) {
+            val s = b.system(memory = emptyList(), style = null, targetLength = 900..1400, draftTurn = false, mode = mode)
+            assertTrue(mode.name, s.startsWith("[오늘] 2026-08-30 (일) 한국 시간."))
+        }
+    }
+
+    @Test
     fun assemblesSectionsInOrderWithSubstitutions() = runTest {
         val s = PromptBuilder(store).system(memory = listOf(mem(1), mem(2, MemoryKind.EXPRESSION)), style = "존댓말", targetLength = 900..1400, draftTurn = false)
         val idx = listOf("역할 문안", "독자 문안", "스타일: 존댓말", "기억:", "- PREFERENCE: 항목1", "- EXPRESSION: 항목2", "구조 문안 길이 900~1400자", "대화 문안", "출력 문안").map { s.indexOf(it) }
