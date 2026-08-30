@@ -68,6 +68,7 @@ data class ChatUiState(
     val hasPanel: Boolean get() = when (mode) {
         SessionMode.WRITE -> panelJobId != null || plan != null
         SessionMode.ADVICE -> focusedPost != null
+        SessionMode.FREE -> false
     }
 }
 

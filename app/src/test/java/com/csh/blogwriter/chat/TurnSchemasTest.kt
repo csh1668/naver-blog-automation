@@ -22,4 +22,9 @@ class TurnSchemasTest {
         assertEquals(listOf("list_my_posts", "read_my_post"), TurnSchemas.functionDeclarations(SessionMode.ADVICE).map { it.name })
         assertEquals(listOf("web_search", "open_page", "remember"), TurnSchemas.functionDeclarations().map { it.name })
     }
+    @Test fun freeSchemaAndTools() {
+        val s = TurnSchemas.turnResponseJsonSchema(SessionMode.FREE)
+        assertEquals(setOf("say"), s["properties"]!!.jsonObject.keys)
+        assertEquals(listOf("web_search", "open_page", "remember"), TurnSchemas.functionDeclarations(SessionMode.FREE).map { it.name })
+    }
 }

@@ -19,6 +19,7 @@ class PromptBuilderTest {
         PromptSection.STRUCTURE to "구조 문안 길이 {{minLen}}~{{maxLen}}자", PromptSection.CONVERSATION to "대화 문안",
         PromptSection.OUTPUT to "출력 문안", PromptSection.SELFCHECK to "점검 문안",
         PromptSection.ADVICE_ROLE to "조언 역할", PromptSection.ADVICE_GUARDS to "조언 규칙", PromptSection.ADVICE_OUTPUT to "조언 출력",
+        PromptSection.FREE_ROLE to "자유 역할", PromptSection.FREE_MEMORY to "자유 기억",
     )
     private val store = object : PromptStore {
         override suspend fun text(section: PromptSection) = texts.getValue(section)
@@ -70,6 +71,14 @@ class PromptBuilderTest {
     fun writeModeDoesNotIncludeAdviceSections() = runTest {
         val s = PromptBuilder(store).system(memory = emptyList(), style = null, targetLength = 900..1400, draftTurn = false)
         assertFalse(s.contains("조언 역할"))
+    }
+
+    @Test
+    fun freeModeAssemblesRoleMemoryAndSuggestionOnly() = runTest {
+        val s = PromptBuilder(store).system(memory = listOf(mem(1)), style = "존댓말", targetLength = 900..1400, draftTurn = false, mode = SessionMode.FREE)
+        val idx = listOf("자유 역할", "- PREFERENCE: 항목1", "자유 기억").map { s.indexOf(it) }
+        assertTrue(idx.all { it >= 0 }); assertEquals(idx, idx.sorted())
+        listOf("역할 문안", "독자 문안", "스타일:", "구조 문안", "대화 문안", "출력 문안", "점검 문안", "조언 역할").forEach { assertFalse(it, s.contains(it)) }
     }
 
     @Test

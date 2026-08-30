@@ -84,7 +84,7 @@ class ConversationEngine(
 
         var useSchema = true
         // 초안·수정 턴만 생각을 깊게 시킨다. 질문·계획·피드백은 짧게 — 한도와 응답 시간을 아낀다. 조언은 글을 읽고 근거를 대야 해서 초안과 같이 깊게.
-        val thinkingLevel = if (ctx.mode == SessionMode.ADVICE || ctx.draftTurn || ctx.currentPost != null) "high" else "low"
+        val thinkingLevel = if (ctx.mode == SessionMode.ADVICE || ctx.mode == SessionMode.FREE || ctx.draftTurn || ctx.currentPost != null) "high" else "low"
         var useThinking = true
         // 이번 "턴" 전체에 한 번만 주는 무료 재시도. pick 마다 주면 시도 상한이 흐려진다.
         var transientRetried = false
@@ -272,16 +272,9 @@ class ConversationEngine(
     /** 대화 기록 → contents. 사진은 첫 user 파트에 inlineData 로, ref 라벨을 텍스트로 함께 붙인다. 현재 계획·post 가 있으면 마지막에 전문을 붙인다. */
     private fun buildContents(ctx: ChatContext): List<GContent> {
         if (ctx.mode == SessionMode.ADVICE) return adviceContents(ctx)
+        if (ctx.mode == SessionMode.FREE) return freeContents(ctx)
         val out = mutableListOf<GContent>()
-        if (ctx.attachments.isNotEmpty()) {
-            val parts = mutableListOf(GPart(text = "첨부 사진 (ref 순서대로):"))
-            ctx.attachments.forEach { a -> parts += GPart(text = "ref=${a.ref}"); parts += GPart(inlineData = GInlineData(a.mimeType, a.jpegBase64)) }
-            // 사용자가 직접 묶은 사진은 반드시 그 묶음 그대로 나가야 한다 — 사진 목록 바로 뒤에 한 줄씩 붙인다.
-            ctx.photoGroups.forEach { group ->
-                parts += GPart(text = "$USER_GROUP[${group.joinToString(", ")}] — 이 사진들은 imageGroup 블록 하나(COLLAGE)로만 쓰고 따로 떼지 않는다")
-            }
-            out += GContent("user", parts)
-        }
+        attachmentContent(ctx, withGroups = true)?.let { out += it }
         ctx.history.forEach { m ->
             if (m.role == MessageRole.SYSTEM || m.kind == MessageKind.SYSTEM) return@forEach
             val role = if (m.role == MessageRole.USER) "user" else "model"
@@ -317,6 +310,31 @@ class ConversationEngine(
         if (m.role == MessageRole.SYSTEM || m.kind != MessageKind.TEXT) return@mapNotNull null
         val text = runCatching { json.parseToJsonElement(m.payloadJson).jsonObject["text"]!!.jsonPrimitive.content }.getOrDefault(m.payloadJson)
         GContent(if (m.role == MessageRole.USER) "user" else "model", listOf(GPart(text = text)))
+    }
+
+    /** 자유 모드: 첨부 사진 + 말·사진 기록만. 계획·초안·사실 확인 지시는 붙이지 않는다. */
+    private fun freeContents(ctx: ChatContext): List<GContent> {
+        val out = mutableListOf<GContent>()
+        attachmentContent(ctx, withGroups = false)?.let { out += it }
+        ctx.history.forEach { m ->
+            if (m.role == MessageRole.SYSTEM) return@forEach
+            val text = when (m.kind) {
+                MessageKind.TEXT -> runCatching { json.parseToJsonElement(m.payloadJson).jsonObject["text"]!!.jsonPrimitive.content }.getOrDefault(m.payloadJson)
+                MessageKind.PHOTOS -> "(사진 ${runCatching { json.parseToJsonElement(m.payloadJson).jsonObject["count"]!!.jsonPrimitive.content }.getOrDefault("")}장 첨부)"
+                else -> return@forEach
+            }
+            out += GContent(if (m.role == MessageRole.USER) "user" else "model", listOf(GPart(text = text)))
+        }
+        return out
+    }
+
+    /** 첨부 사진을 첫 user 파트로. [withGroups] 면 사용자 묶음 줄도 붙인다(글쓰기). 첨부가 없으면 null. */
+    private fun attachmentContent(ctx: ChatContext, withGroups: Boolean): GContent? {
+        if (ctx.attachments.isEmpty()) return null
+        val parts = mutableListOf(GPart(text = "첨부 사진 (ref 순서대로):"))
+        ctx.attachments.forEach { a -> parts += GPart(text = "ref=${a.ref}"); parts += GPart(inlineData = GInlineData(a.mimeType, a.jpegBase64)) }
+        if (withGroups) ctx.photoGroups.forEach { group -> parts += GPart(text = "$USER_GROUP[${group.joinToString(", ")}] — 이 사진들은 imageGroup 블록 하나(COLLAGE)로만 쓰고 따로 떼지 않는다") }
+        return GContent("user", parts)
     }
 }
 

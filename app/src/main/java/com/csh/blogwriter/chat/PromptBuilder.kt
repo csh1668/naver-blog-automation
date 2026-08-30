@@ -27,6 +27,8 @@ class PromptBuilder @Inject constructor(private val store: PromptStore) {
             }
             // 조언은 글쓰기 규칙(구조·대화·출력·점검)을 싣지 않는다 — 스타일·기억만 공유해 "출발점"을 알게 한다.
             SessionMode.ADVICE -> listOf(store.text(PromptSection.ADVICE_ROLE), styleSection, memorySection, store.text(PromptSection.ADVICE_GUARDS), store.text(PromptSection.ADVICE_OUTPUT))
+            // 자유는 블로그 페르소나·스타일을 싣지 않고 기억만 공유한다.
+            SessionMode.FREE -> listOf(store.text(PromptSection.FREE_ROLE), memorySection, store.text(PromptSection.FREE_MEMORY))
         }
         // 길이 자리표시자는 어느 섹션에 있든(구조·자기점검·관리자가 편집한 곳) 모두 채운다.
         return sections.joinToString("\n\n")

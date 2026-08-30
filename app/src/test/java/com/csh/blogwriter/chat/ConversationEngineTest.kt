@@ -486,6 +486,32 @@ class ConversationEngineTest {
         assertTrue(body.contains("\"includeThoughts\":true"))
     }
 
+    // ---- 자유 모드 ----
+
+    private fun userText(text: String) = ChatMessage(1, "s", 0, MessageRole.USER, MessageKind.TEXT, """{"text":"$text"}""", 0)
+    private val silentListener = object : TurnListener {
+        override fun onToolStatus(text: String) {}
+        override fun onPartialSay(text: String) {}
+    }
+
+    @Test
+    fun freeTurnSendsPhotosButNoPlanInstructionsAndThinksHigh() = runTest {
+        server.enqueue(textResponse("""{"say":"안녕하세요"}"""))
+        val ctx = ChatContext(history = listOf(userText("사진에 뭐가 있어?")), attachments = listOf(Attachment("img_001", "AAAA")), style = "존댓말", draftTurn = false, currentPost = null, mode = SessionMode.FREE)
+        val r = engine().runTurn(ctx, silentListener) as TurnResult.Success
+        assertEquals("안녕하세요", r.response.say)
+        val body = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        val system = body["systemInstruction"]!!.jsonObject["parts"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content
+        assertTrue(system.contains("[FREE_ROLE]")); assertFalse(system.contains("[STRUCTURE]")); assertFalse(system.contains("[ADVICE_ROLE]"))
+        assertTrue(body.toString().contains("\"inlineData\""))
+        val userTexts = body["contents"]!!.jsonArray.flatMap { it.jsonObject["parts"]!!.jsonArray }.mapNotNull { it.jsonObject["text"]?.jsonPrimitive?.content }
+        assertFalse(userTexts.any { it.contains("plan 을") || it.contains("현재 계획") || it.contains("post 를") })
+        assertEquals("high", body["generationConfig"]!!.jsonObject["thinkingConfig"]!!.jsonObject["thinkingLevel"]!!.jsonPrimitive.content)
+        assertEquals(listOf("say"), body["generationConfig"]!!.jsonObject["responseJsonSchema"]!!.jsonObject["required"]!!.jsonArray.map { it.jsonPrimitive.content })
+        val tools = body["tools"]!!.jsonArray[0].jsonObject["functionDeclarations"]!!.jsonArray.map { it.jsonObject["name"]!!.jsonPrimitive.content }
+        assertEquals(listOf("web_search", "open_page", "remember"), tools)
+    }
+
     @Test
     fun thoughtsAccumulateAcrossToolRounds() = runTest {
         server.enqueue(sse(thoughtChunk("first"), callChunk))

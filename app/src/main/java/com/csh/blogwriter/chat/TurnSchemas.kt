@@ -55,6 +55,12 @@ object TurnSchemas {
         putJsonArray("required") { add("title"); add("blocks") }
     }
 
+    private val sayOnly = buildJsonObject {
+        put("type", "object")
+        putJsonObject("properties") { put("say", str("말풍선 본문")) }
+        putJsonArray("required") { add("say") }
+    }
+
     fun turnResponseJsonSchema(mode: SessionMode = SessionMode.WRITE): JsonObject = when (mode) {
         SessionMode.WRITE -> buildJsonObject {
             put("type", "object")
@@ -66,24 +72,22 @@ object TurnSchemas {
             }
             putJsonArray("required") { add("say"); add("quickReplies"); add("readyToDraft") }
         }
-        SessionMode.ADVICE -> buildJsonObject {
-            put("type", "object")
-            putJsonObject("properties") { put("say", str("조언 본문. 마크다운 없이 줄바꿈만, 800자 안팎")) }
-            putJsonArray("required") { add("say") }
-        }
+        SessionMode.ADVICE, SessionMode.FREE -> sayOnly
     }
 
+    private val writeTools = listOf(
+        GFunctionDeclaration("web_search", "네이버(실패 시 구글)에서 검색해 결과 목록(results)과 결과 페이지 요약(pageSummary: 플레이스 카드의 영업시간·주소·전화·가격 등)을 돌려준다. 영업시간·주소·가격·행사 날짜처럼 사실 확인이 필요할 때 쓴다. pageSummary 에 답이 있으면 open_page 는 필요 없다.",
+            buildJsonObject { put("type", "object"); putJsonObject("properties") { put("query", str("검색어")) }; putJsonArray("required") { add("query") } }),
+        GFunctionDeclaration("open_page", "웹 페이지를 열어 본문 텍스트(최대 4000자)를 돌려준다. web_search 결과의 url만 연다.",
+            buildJsonObject { put("type", "object"); putJsonObject("properties") { put("url", str("http(s) 주소")) }; putJsonArray("required") { add("url") } }),
+        GFunctionDeclaration("remember", "사용자의 취향·습관·자주 쓰는 표현·사실을 저장한다. 저장 후 say에 '기억해 둘게요: …' 로 알린다.",
+            buildJsonObject { put("type", "object"); putJsonObject("properties") {
+                put("kind", buildJsonObject { put("type", "string"); putJsonArray("enum") { add("STYLE"); add("PREFERENCE"); add("FACT"); add("EXPRESSION") } }); put("text", str("한 문장"))
+            }; putJsonArray("required") { add("kind"); add("text") } }),
+    )
+
     fun functionDeclarations(mode: SessionMode = SessionMode.WRITE): List<GFunctionDeclaration> = when (mode) {
-        SessionMode.WRITE -> listOf(
-            GFunctionDeclaration("web_search", "네이버(실패 시 구글)에서 검색해 결과 목록(results)과 결과 페이지 요약(pageSummary: 플레이스 카드의 영업시간·주소·전화·가격 등)을 돌려준다. 영업시간·주소·가격·행사 날짜처럼 사실 확인이 필요할 때 쓴다. pageSummary 에 답이 있으면 open_page 는 필요 없다.",
-                buildJsonObject { put("type", "object"); putJsonObject("properties") { put("query", str("검색어")) }; putJsonArray("required") { add("query") } }),
-            GFunctionDeclaration("open_page", "웹 페이지를 열어 본문 텍스트(최대 4000자)를 돌려준다. web_search 결과의 url만 연다.",
-                buildJsonObject { put("type", "object"); putJsonObject("properties") { put("url", str("http(s) 주소")) }; putJsonArray("required") { add("url") } }),
-            GFunctionDeclaration("remember", "사용자의 취향·습관·자주 쓰는 표현·사실을 저장한다. 저장 후 say에 '기억해 둘게요: …' 로 알린다.",
-                buildJsonObject { put("type", "object"); putJsonObject("properties") {
-                    put("kind", buildJsonObject { put("type", "string"); putJsonArray("enum") { add("STYLE"); add("PREFERENCE"); add("FACT"); add("EXPRESSION") } }); put("text", str("한 문장"))
-                }; putJsonArray("required") { add("kind"); add("text") } }),
-        )
+        SessionMode.WRITE, SessionMode.FREE -> writeTools
         SessionMode.ADVICE -> listOf(
             GFunctionDeclaration("list_my_posts", "사용자 블로그의 최근 글 30개(logNo·제목·날짜·댓글·공감·사진 수·요약)를 돌려준다. 시스템 프롬프트의 목록이 없거나 오래됐을 때만 부른다.",
                 buildJsonObject { put("type", "object"); putJsonObject("properties") {} }),

@@ -10,7 +10,7 @@ import javax.inject.Inject
 
 enum class SessionStatus { DRAFTING, PUBLISHING, PUBLISHED, ARCHIVED }
 enum class MessageRole { USER, ASSISTANT, SYSTEM }
-enum class SessionMode { WRITE, ADVICE }
+enum class SessionMode { WRITE, ADVICE, FREE }
 /** [PHOTO_GROUPS] 는 사용자가 정한 사진 묶음, [BLOG_POSTS]/[POST_VIEW] 는 최근 글 목록·글 보기 — 셋 다 모델 히스토리에 싣지 않고 화면·복원에만 쓴다. */
 enum class MessageKind { TEXT, PHOTOS, PLAN, POST, SYSTEM, PHOTO_GROUPS, BLOG_POSTS, POST_VIEW }
 

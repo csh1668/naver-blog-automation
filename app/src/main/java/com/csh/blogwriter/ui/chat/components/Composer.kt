@@ -186,7 +186,7 @@ fun Composer(
     }
 }
 
-private fun SessionMode.label() = when (this) { SessionMode.WRITE -> "✍️ 글쓰기"; SessionMode.ADVICE -> "💬 조언" }
+private fun SessionMode.label() = when (this) { SessionMode.WRITE -> "✍️ 글쓰기"; SessionMode.ADVICE -> "💬 조언"; SessionMode.FREE -> "🤖 자유" }
 
 /** 입력창 안 하단의 모드 칩. [onModeChange] 가 null 이면 눌리지 않는 라벨. */
 @Composable
