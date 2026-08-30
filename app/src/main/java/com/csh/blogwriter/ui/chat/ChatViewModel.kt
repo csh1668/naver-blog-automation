@@ -93,6 +93,8 @@ class ChatViewModel @Inject constructor(
         /** 앱을 켤 때마다 확인하되, 설정 화면을 오가며 ViewModel 이 다시 만들어질 때의 연속 호출만 막는다. */
         private const val UPDATE_CHECK_INTERVAL_MS = 10 * 60 * 1000L
         private val DRAFT_WORDS = Regex("초안|써 줘|작성해")
+        /** 사진을 붙일 수 있는 모드 — 글쓰기와 자유. */
+        val PHOTO_MODES = setOf(SessionMode.WRITE, SessionMode.FREE)
     }
 
     private val _uiState = MutableStateFlow(ChatUiState())
@@ -268,7 +270,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun attachPhotos(uris: List<String>) {
-        if (_uiState.value.mode != SessionMode.WRITE) return
+        if (_uiState.value.mode !in PHOTO_MODES) return
         if (uris.isEmpty()) return
         // 초안이 나온 뒤에 붙인 사진은 아직 에디터에 올라가 있지 않다 — 다음 수정본이 그 ref 를 쓰면
         // 주입이 통째로 실패한다. 증분 업로드는 SP3, SP2 에서는 아예 막는다.
@@ -416,6 +418,9 @@ class ChatViewModel @Inject constructor(
         _uiState.update { it.copy(focusedPost = view, panelOpen = true, listCollapsed = true) }
     }
 
+    /** 스트리밍 중인 생각을 사용자가 직접 펴거나 접는다. */
+    fun toggleStreamingThought() = _uiState.update { it.copy(thoughtCollapsed = !it.thoughtCollapsed) }
+
     /** 계획 줄이나 "초안 열기"에서 부른다 — 이미 열려 있으면 그대로 둔다(토글과 다르다). */
     fun openPanel() = _uiState.update { if (it.hasPanel) it.copy(panelOpen = true, listCollapsed = true) else it }
 
@@ -490,7 +495,7 @@ class ChatViewModel @Inject constructor(
         lastDraftTurn = draftTurn
         // 연타로 두 턴이 겹치지 않게 코루틴을 띄우기 전에 잠근다.
         _uiState.update {
-            it.copy(thinking = true, streamingSay = null, toolStatus = null, quickReplies = emptyList(), error = null, draftGate = null)
+            it.copy(thinking = true, streamingSay = null, streamingThought = null, thoughtCollapsed = false, toolStatus = null, quickReplies = emptyList(), error = null, draftGate = null)
         }
         turnJob = viewModelScope.launch {
             // "새 글" 의 첫 턴이면 여기서 대화가 생긴다.
@@ -519,14 +524,14 @@ class ChatViewModel @Inject constructor(
                 // 답을 기다리는 사이 다른 대화로 옮겨 갔다면 이 답은 조용히 버린다 (아무 데도 저장하지 않는다).
                 if (!isCurrent(sessionId)) return@launch
                 when (result) {
-                    is TurnResult.Success -> onSuccess(sessionId, result.response, result.repairs)
+                    is TurnResult.Success -> onSuccess(sessionId, result.response, result.repairs, result.thought)
                     is TurnResult.Failure -> {
                         _uiState.update { it.copy(streamingSay = null) }
                         onFailure(sessionId, result)
                     }
                 }
             } finally {
-                if (isCurrent(sessionId)) _uiState.update { it.copy(thinking = false, streamingSay = null, toolStatus = null) }
+                if (isCurrent(sessionId)) _uiState.update { it.copy(thinking = false, streamingSay = null, streamingThought = null, thoughtCollapsed = false, toolStatus = null) }
             }
         }
     }
@@ -551,7 +556,9 @@ class ChatViewModel @Inject constructor(
     private fun listenerFor(sessionId: String) = object : TurnListener {
         override fun onToolStatus(text: String) = _uiState.update { it.copy(toolStatus = text) }
         // 값은 늘 "지금까지의 전체 접두" 다 — 이어붙이지 않고 교체한다. 빈 문자열은 지우라는 뜻.
-        override fun onPartialSay(text: String) = _uiState.update { it.copy(streamingSay = text.ifEmpty { null }) }
+        override fun onPartialThought(text: String) { if (isCurrent(sessionId)) _uiState.update { it.copy(streamingThought = text.ifEmpty { null }) } }
+        // 답이 오기 시작하면 생각은 접는다 — 한 번 접히면 턴이 끝날 때까지 다시 펴지지 않는다(사용자가 탭하면 예외).
+        override fun onPartialSay(text: String) { if (isCurrent(sessionId)) _uiState.update { it.copy(streamingSay = text.ifEmpty { null }, thoughtCollapsed = it.thoughtCollapsed || text.isNotEmpty()) } }
         // 조언 도구가 글을 읽으면 오른쪽을 그 글로 연다. 대화에도 남겨 다시 열 때 되살린다.
         override fun onPostRead(logNo: String, title: String) {
             if (!isCurrent(sessionId)) return
@@ -564,7 +571,7 @@ class ChatViewModel @Inject constructor(
     private suspend fun context(session: ChatSession, draftTurn: Boolean): ChatContext {
         val all = chatRepo.messagesOnce(session.id)
         val history = all.filterNot { it.role == MessageRole.SYSTEM || it.kind == MessageKind.SYSTEM }
-        // 조언 세션은 사진·계획·초안을 쓰지 않는다 — 프롬프트에도 실어 보내지 않는다.
+        // 조언·자유 세션은 계획·초안·말투를 쓰지 않는다 — 프롬프트에도 실어 보내지 않는다(자유는 사진만 받는다).
         val write = session.mode == SessionMode.WRITE
         val style = memory.activeItems()
             .filter { it.kind == MemoryKind.STYLE }
@@ -572,25 +579,25 @@ class ChatViewModel @Inject constructor(
             .ifEmpty { null }
         return ChatContext(
             history = history,
-            attachments = if (write) photoAttachments.attachments(session.id, _uiState.value.attachments) else emptyList(),
+            attachments = if (session.mode in PHOTO_MODES) photoAttachments.attachments(session.id, _uiState.value.attachments) else emptyList(),
             photoGroups = if (write) _uiState.value.photoGroups else emptyList(),
-            style = style,
+            style = if (write) style else null,
             draftTurn = draftTurn,
             // 초안이 나오기 전까지는 계획을 함께 보낸다 — 모델이 "이 계획을 고쳐라"로 읽는다.
             currentPlan = if (write && _uiState.value.panelJobId == null) lastPlan(history) else null,
             // 재주입 조건과 같아야 한다 — 패널을 접어 두고 "문단 2를 더 짧게" 라고 해도 지금 초안을 함께 보낸다.
             currentPost = if (write && _uiState.value.panelJobId != null) lastPost(history) else null,
-            questionRounds = questionRounds(history),
+            questionRounds = if (write) questionRounds(history) else 0,
             mode = session.mode,
             blogPosts = all.lastOrNull { it.kind == MessageKind.BLOG_POSTS }?.let { ChatPayloads.readBlogPosts(it.payloadJson) },
         )
     }
 
-    private suspend fun onSuccess(sessionId: String, response: TurnResponse, repairs: List<String>) {
+    private suspend fun onSuccess(sessionId: String, response: TurnResponse, repairs: List<String>, thought: String?) {
         val session = sessionOf(sessionId) ?: return
-        // 조언은 말만 남긴다 — 계획·초안·품질 게이트는 글쓰기 몫이다.
-        if (session.mode == SessionMode.ADVICE) {
-            chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.TEXT, ChatPayloads.text(response.say))
+        // 조언·자유는 말만 남긴다 — 계획·초안·품질 게이트는 글쓰기 몫이다.
+        if (session.mode == SessionMode.ADVICE || session.mode == SessionMode.FREE) {
+            chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.TEXT, ChatPayloads.assistantText(response.say, thought))
             _uiState.update { it.copy(streamingSay = null) }
             if (session.title == null) {
                 val first = chatRepo.messagesOnce(sessionId).firstOrNull { it.role == MessageRole.USER && it.kind == MessageKind.TEXT }
@@ -607,7 +614,7 @@ class ChatViewModel @Inject constructor(
         readyToDraft = !questionTurn && (response.readyToDraft || (response.post != null && post == null))
         // 질문은 말풍선 하나 안에서 say 다음 줄에 붙인다.
         val say = if (response.question.isNullOrBlank()) response.say else response.say + "\n" + response.question
-        chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.TEXT, ChatPayloads.text(say))
+        chatRepo.appendMessage(sessionId, MessageRole.ASSISTANT, MessageKind.TEXT, ChatPayloads.assistantText(say, thought))
         // 실제 말풍선이 생긴 뒤에 임시 말풍선을 지운다 — 중간에 빈 화면이 보이지 않게.
         _uiState.update { it.copy(streamingSay = null) }
         response.plan?.let {

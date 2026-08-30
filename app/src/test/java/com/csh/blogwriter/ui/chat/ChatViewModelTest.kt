@@ -239,7 +239,7 @@ class ChatViewModelTest {
         ChatViewModel(chatRepo, runner, pendingJobs, photos, FakeApiKeyStore(hasKey), memory, hook, settings, checker, blog)
             .also { viewModel = it }
 
-    private fun say(text: String) = TurnResult.Success(TurnResponse(say = text), emptyList(), "m")
+    private fun say(text: String, thought: String? = null) = TurnResult.Success(TurnResponse(say = text), emptyList(), "m", thought)
 
     private fun planTurn() = TurnResult.Success(TurnResponse(say = "계획이에요", plan = PLAN, readyToDraft = true), emptyList(), "m")
 
@@ -1327,5 +1327,74 @@ class ChatViewModelTest {
         vm.send("원주 한우 다녀왔어"); advanceUntilIdle()
         assertEquals(0, blog.listCalls)
         assertEquals(SessionMode.WRITE, contexts.last().mode)
+    }
+
+    @Test
+    fun freeSessionSendsWithoutLoginAllowsPhotosAndTitlesFromFirstMessage() = runTest {
+        settings.blogIdFlow.value = null
+        turns += say("안녕하세요")
+        val vm = newViewModel()
+        vm.openInitial(null); advanceUntilIdle()
+        vm.setMode(SessionMode.FREE)
+        vm.attachPhotos(listOf("content://a")); advanceUntilIdle()
+        assertEquals(1, vm.uiState.value.attachments.size)
+        vm.send("이 사진 뭐야?"); advanceUntilIdle()
+        val session = chatRepo.sessions.value.single()
+        assertEquals(SessionMode.FREE, session.mode); assertEquals("이 사진 뭐야?", session.title)
+        assertNull(vm.uiState.value.error)
+        val ctx = contexts.last()
+        assertEquals(SessionMode.FREE, ctx.mode); assertEquals(1, ctx.attachments.size); assertNull(ctx.style); assertNull(ctx.currentPlan); assertNull(ctx.currentPost)
+        assertTrue(ctx.photoGroups.isEmpty())
+    }
+
+    @Test
+    fun freeSessionRejectsGroupingAndDraft() = runTest {
+        turns += say("네")
+        val vm = newViewModel()
+        vm.openInitial(null); advanceUntilIdle()
+        vm.setMode(SessionMode.FREE)
+        vm.attachPhotos(listOf("content://a", "content://b")); advanceUntilIdle()
+        vm.startGrouping(); assertNull(vm.uiState.value.groupPicks)
+        vm.send("안녕"); advanceUntilIdle()
+        vm.requestDraft(); advanceUntilIdle()
+        assertEquals(1, contexts.size); assertNull(vm.uiState.value.plan); assertFalse(vm.uiState.value.hasPanel)
+    }
+
+    @Test
+    fun streamingThoughtShowsThenCollapsesWhenAnswerStarts() = runTest {
+        turns += say("답", thought = "**Plan** think")
+        partials = emptyList()
+        val seen = mutableListOf<Pair<String?, Boolean>>()
+        val vm = newViewModel()
+        vm.openInitial(null); advanceUntilIdle()
+        vm.setMode(SessionMode.FREE)
+        onTurn = { l ->
+            l.onPartialThought(""); seen += vm.uiState.value.let { it.streamingThought to it.thoughtCollapsed }
+            l.onPartialThought("**Plan**"); seen += vm.uiState.value.let { it.streamingThought to it.thoughtCollapsed }
+            l.onPartialSay("답"); seen += vm.uiState.value.let { it.streamingThought to it.thoughtCollapsed }
+        }
+        vm.send("질문"); advanceUntilIdle()
+        assertEquals(listOf(null to false, "**Plan**" to false, "**Plan**" to true), seen)
+        // 턴이 끝나면 스트리밍 상태는 비고, 저장된 메시지가 생각을 이어받는다.
+        assertNull(vm.uiState.value.streamingThought); assertFalse(vm.uiState.value.thoughtCollapsed)
+        val last = chatRepo.of(chatRepo.sessions.value.single().id).last { it.role == MessageRole.ASSISTANT }
+        assertEquals("**Plan** think", ChatPayloads.readThought(last.payloadJson)); assertEquals("답", ChatPayloads.readText(last.payloadJson))
+    }
+
+    @Test
+    fun writeTurnAlsoStoresThought() = runTest {
+        turns += TurnResult.Success(TurnResponse(say = "계획이에요", plan = PLAN, readyToDraft = true), emptyList(), "m", thought = "생각")
+        val vm = newViewModel()
+        vm.openInitial(null); advanceUntilIdle()
+        vm.send("원주 한우 다녀왔어"); advanceUntilIdle()
+        val last = chatRepo.of(chatRepo.sessions.value.single().id).last { it.role == MessageRole.ASSISTANT && it.kind == MessageKind.TEXT }
+        assertEquals("생각", ChatPayloads.readThought(last.payloadJson))
+    }
+
+    @Test
+    fun toggleStreamingThoughtFlipsCollapse() = runTest {
+        val vm = newViewModel()
+        vm.toggleStreamingThought(); assertTrue(vm.uiState.value.thoughtCollapsed)
+        vm.toggleStreamingThought(); assertFalse(vm.uiState.value.thoughtCollapsed)
     }
 }

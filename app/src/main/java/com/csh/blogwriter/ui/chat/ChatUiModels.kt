@@ -28,6 +28,10 @@ data class ChatUiState(
     val attachments: List<AttachedPhoto> = emptyList(),
     val thinking: Boolean = false,
     val streamingSay: String? = null,
+    /** 답이 오기 전까지 보여 주는, 지금까지의 생각 요약 전체. */
+    val streamingThought: String? = null,
+    /** 답 파트가 오기 시작하면 true — 스트리밍 중인 생각을 접는다. */
+    val thoughtCollapsed: Boolean = false,
     val toolStatus: String? = null,
     val error: String? = null,
     val quickReplies: List<String> = emptyList(),
@@ -96,6 +100,11 @@ object ChatPayloads {
     private val groupList = ListSerializer(strings)
 
     fun text(value: String): String = json.encodeToString(JsonObject.serializer(), buildJsonObject { put("text", value) })
+
+    /** 어시스턴트 말풍선. 생각 요약이 있으면 함께 담는다(모델 히스토리에는 싣지 않는다). */
+    fun assistantText(text: String, thought: String?): String = json.encodeToString(JsonObject.serializer(), buildJsonObject { put("text", text); if (!thought.isNullOrBlank()) put("thought", thought) })
+
+    fun readThought(payload: String): String? = runCatching { json.parseToJsonElement(payload).jsonObject["thought"]?.jsonPrimitive?.content }.getOrNull()
 
     fun readText(payload: String): String =
         runCatching { json.parseToJsonElement(payload).jsonObject["text"]!!.jsonPrimitive.content }.getOrDefault(payload)
