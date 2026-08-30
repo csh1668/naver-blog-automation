@@ -20,20 +20,30 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.content.Intent
+import com.csh.blogwriter.BuildConfig
 import com.csh.blogwriter.data.prefs.SettingsStore
 import com.csh.blogwriter.llm.ApiKeyStore
 import com.csh.blogwriter.session.NaverSession
 import com.csh.blogwriter.ui.components.AppTopBar
+import com.csh.blogwriter.ui.components.BannerKind
 import com.csh.blogwriter.ui.components.ConfirmSheet
+import com.csh.blogwriter.ui.components.InlineBanner
 import com.csh.blogwriter.ui.components.ListRow
 import com.csh.blogwriter.ui.components.ScreenScaffold
 import com.csh.blogwriter.ui.theme.AppSpacing
 import com.csh.blogwriter.ui.theme.AppTheme
+import com.csh.blogwriter.update.UpdateChecker
+import com.csh.blogwriter.update.UpdateInfo
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -41,20 +51,46 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-data class SettingsUiState(val apiKeyCount: Int = 0, val researchEnabled: Boolean = true, val loggedIn: Boolean = false)
+/** 설정 화면의 "업데이트 확인" 결과. */
+sealed interface UpdateCheckState {
+    data object Idle : UpdateCheckState
+    data object Checking : UpdateCheckState
+    data class Available(val info: UpdateInfo) : UpdateCheckState
+    data class UpToDate(val version: String) : UpdateCheckState
+    data object Failed : UpdateCheckState
+}
+
+data class SettingsUiState(
+    val apiKeyCount: Int = 0,
+    val researchEnabled: Boolean = true,
+    val loggedIn: Boolean = false,
+    val updateCheck: UpdateCheckState = UpdateCheckState.Idle,
+)
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settings: SettingsStore,
     keyStore: ApiKeyStore,
     private val naverSession: NaverSession,
+    private val updateChecker: UpdateChecker,
 ) : ViewModel() {
-    val uiState: StateFlow<SettingsUiState> = combine(keyStore.keys, settings.researchEnabled, settings.blogId) { keys, research, blogId ->
-        SettingsUiState(apiKeyCount = keys.size, researchEnabled = research, loggedIn = blogId != null)
+    private val _updateCheck = MutableStateFlow<UpdateCheckState>(UpdateCheckState.Idle)
+
+    val uiState: StateFlow<SettingsUiState> = combine(keyStore.keys, settings.researchEnabled, settings.blogId, _updateCheck) { keys, research, blogId, updateCheck ->
+        SettingsUiState(apiKeyCount = keys.size, researchEnabled = research, loggedIn = blogId != null, updateCheck = updateCheck)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
     fun setResearchEnabled(enabled: Boolean) = viewModelScope.launch { settings.setResearchEnabled(enabled) }
     fun logout(onDone: () -> Unit) = viewModelScope.launch { naverSession.logout(); onDone() }
+
+    fun checkForUpdate() = viewModelScope.launch {
+        _updateCheck.value = UpdateCheckState.Checking
+        val info = try { updateChecker.checkForUpdate() } catch (e: CancellationException) { throw e } catch (e: Exception) { _updateCheck.value = UpdateCheckState.Failed; return@launch }
+        if (info == null) { _updateCheck.value = UpdateCheckState.UpToDate(BuildConfig.VERSION_NAME); return@launch }
+        // 수동으로 찾은 새 버전은 채팅 배너로도 보이게 — 닫아 둔 태그를 풀고 10분 간격도 무시한다.
+        settings.setDismissedUpdateTag(null); settings.setLastUpdateCheckAt(0L)
+        _updateCheck.value = UpdateCheckState.Available(info)
+    }
 }
 
 /** 관리자 설정 목록. 기술 용어 허용. */
@@ -72,6 +108,7 @@ fun SettingsScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var logoutConfirm by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     ScreenScaffold(topBar = { AppTopBar(onBack = onBack, title = "설정 (관리자)") }) {
         Spacer(Modifier.height(AppSpacing.lg))
@@ -86,6 +123,34 @@ fun SettingsScreen(
         ResearchToggleRow(checked = state.researchEnabled, onCheckedChange = viewModel::setResearchEnabled)
         Spacer(Modifier.height(AppSpacing.md))
         ListRow(title = "실패 로그", onClick = onFailureLogs)
+        Spacer(Modifier.height(AppSpacing.md))
+        ListRow(
+            title = "업데이트 확인",
+            subtitle = "지금 버전 ${BuildConfig.VERSION_NAME}",
+            onClick = viewModel::checkForUpdate,
+            trailingChevron = false,
+        )
+        when (val updateCheck = state.updateCheck) {
+            UpdateCheckState.Checking -> {
+                Spacer(Modifier.height(AppSpacing.sm))
+                InlineBanner("새 버전이 있는지 확인하고 있어요", BannerKind.Info)
+            }
+            is UpdateCheckState.Available -> {
+                Spacer(Modifier.height(AppSpacing.sm))
+                InlineBanner("새 버전(${updateCheck.info.tag})이 나왔어요 — 받으러 가기", BannerKind.Success) {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, updateCheck.info.htmlUrl.toUri()))
+                }
+            }
+            is UpdateCheckState.UpToDate -> {
+                Spacer(Modifier.height(AppSpacing.sm))
+                InlineBanner("최신 버전이에요 (${updateCheck.version})", BannerKind.Info)
+            }
+            UpdateCheckState.Failed -> {
+                Spacer(Modifier.height(AppSpacing.sm))
+                InlineBanner("확인하지 못했어요. 인터넷 연결을 확인해 주세요.", BannerKind.Warning)
+            }
+            UpdateCheckState.Idle -> {}
+        }
         Spacer(Modifier.height(AppSpacing.md))
         // 로그인 전에는 여기서 바로 로그인할 수 있게 한다 — 첫 화면이 채팅이라 따로 로그인 화면을 거치지 않으므로.
         if (state.loggedIn) ListRow(title = "네이버 로그아웃", onClick = { logoutConfirm = true }, trailingChevron = false)
