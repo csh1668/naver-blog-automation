@@ -27,7 +27,7 @@ private const val MAX_BUBBLE_FRACTION = 0.8f
 
 /** 말풍선. 사용자는 오른쪽 브랜드색, 어시스턴트는 왼쪽 연회색. */
 @Composable
-fun MessageBubble(text: String, mine: Boolean) {
+fun MessageBubble(text: String, mine: Boolean, markdown: Boolean = false) {
     val c = AppTheme.colors
     val shape = if (mine) {
         RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp)
@@ -42,7 +42,11 @@ fun MessageBubble(text: String, mine: Boolean) {
                 .background(if (mine) c.fillBrand else c.surfaceWeak)
                 .padding(horizontal = AppSpacing.lg, vertical = AppSpacing.md),
         ) {
-            Text(text, style = AppTheme.typography.body1, color = if (mine) c.textOnBrand else c.textPrimary)
+            if (markdown) {
+                MarkdownLite(text)
+            } else {
+                Text(text, style = AppTheme.typography.body1, color = if (mine) c.textOnBrand else c.textPrimary)
+            }
         }
     }
 }

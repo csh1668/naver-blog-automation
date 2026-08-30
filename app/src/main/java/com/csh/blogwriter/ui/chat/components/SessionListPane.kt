@@ -142,6 +142,11 @@ private fun SessionRow(
     var menuExpanded by remember { mutableStateOf(false) }
     var confirmingDelete by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
+    val modeChip = when (session.mode) {
+        SessionMode.WRITE -> null
+        SessionMode.ADVICE -> "조언"
+        SessionMode.FREE -> "자유"
+    }
 
     Row(
         Modifier.fillMaxWidth().heightIn(min = AppSpacing.touchTarget)
@@ -153,10 +158,10 @@ private fun SessionRow(
     ) {
         Column(Modifier.weight(1f).padding(vertical = AppSpacing.md)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // 조언 대화는 제목 앞에 칩을 달아 목록에서 바로 구분된다.
-                if (session.mode == SessionMode.ADVICE) {
+                // 글쓰기가 아닌 대화는 제목 앞에 칩을 달아 목록에서 바로 구분된다.
+                if (modeChip != null) {
                     Text(
-                        "조언",
+                        modeChip,
                         style = AppTheme.typography.caption, color = c.fillBrand,
                         modifier = Modifier.clip(RoundedCornerShape(AppSpacing.radiusControl)).background(c.fillBrandWeak)
                             .padding(horizontal = AppSpacing.sm, vertical = 2.dp),
@@ -173,7 +178,7 @@ private fun SessionRow(
                 )
             }
             Text(
-                "${relativeTime(session.updatedAt)} · ${if (session.mode == SessionMode.ADVICE) "조언" else statusLabel(session.status)}",
+                "${relativeTime(session.updatedAt)} · ${modeChip ?: statusLabel(session.status)}",
                 style = AppTheme.typography.caption, color = c.textSecondary, maxLines = 1,
             )
         }

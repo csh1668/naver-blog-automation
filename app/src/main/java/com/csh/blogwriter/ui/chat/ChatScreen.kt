@@ -94,6 +94,7 @@ import com.csh.blogwriter.ui.chat.components.SessionListPane
 import com.csh.blogwriter.ui.chat.components.SessionListWidth
 import com.csh.blogwriter.ui.chat.components.SessionRailWidth
 import com.csh.blogwriter.ui.chat.components.SystemMessage
+import com.csh.blogwriter.ui.chat.components.ThoughtBlock
 import com.csh.blogwriter.ui.chat.components.ToolStatusLine
 import com.csh.blogwriter.ui.components.BannerKind
 import com.csh.blogwriter.ui.components.BottomCta
@@ -110,6 +111,9 @@ import kotlinx.coroutines.launch
 private val WIDE_MIN = 840.dp
 private val PANEL_MIN = 520.dp
 private val TRAY_MAX_HEIGHT = 240.dp
+
+/** 로그인 안내를 띄우는 모드 — 자유 대화는 네이버 로그인이 필요 없다. */
+private val LOGIN_NUDGE_MODES = setOf(SessionMode.WRITE, SessionMode.ADVICE)
 
 @Composable
 fun ChatScreen(
@@ -277,7 +281,7 @@ private fun ChatPane(
     /** 방금 보냈으면 읽던 자리와 상관없이 맨 아래로 따라간다. */
     var justSent by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
-    val itemCount = ui.messages.size + (if (ui.streamingSay != null) 1 else 0) + (if (ui.thinking) 1 else 0)
+    val itemCount = ui.messages.size + (if (ui.streamingThought != null) 1 else 0) + (if (ui.streamingSay != null) 1 else 0) + (if (ui.thinking) 1 else 0)
     LaunchedEffect(itemCount, ui.streamingSay) {
         if (itemCount == 0) return@LaunchedEffect
         // 위쪽 지난 대화를 읽는 중이면 끌어내리지 않는다.
@@ -352,11 +356,14 @@ private fun ChatPane(
                 onAttach = viewModel::attachPhotos,
                 enabled = ui.hasKey && !ui.thinking,
                 placeholder = when {
-                    ui.thinking -> if (ui.mode == SessionMode.ADVICE) "글을 읽고 있어요" else "글을 구상하고 있어요"
+                    ui.thinking && ui.mode == SessionMode.ADVICE -> "글을 읽고 있어요"
+                    ui.thinking && ui.mode == SessionMode.FREE -> "생각하고 있어요"
+                    ui.thinking -> "글을 구상하고 있어요"
                     ui.mode == SessionMode.ADVICE -> "어떤 글을 봐 드릴까요? 예: 최근 글 봐 줘"
+                    ui.mode == SessionMode.FREE -> "궁금한 것을 물어보세요"
                     else -> "오늘 있었던 일을 들려주세요"
                 },
-                showAttach = ui.mode == SessionMode.WRITE,
+                showAttach = ui.mode in ChatViewModel.PHOTO_MODES,
                 canAttach = ui.panelJobId == null,
                 hero = hero,
                 onFocusChanged = onComposerFocusChanged,
@@ -373,15 +380,19 @@ private fun ChatPane(
             ) {
                 Column(Modifier.widthIn(max = AppSpacing.contentMaxWidth).padding(vertical = AppSpacing.lg)) {
                     Text(
-                        if (ui.mode == SessionMode.ADVICE) "블로그를 함께 살펴볼까요?" else "오늘은 어떤 이야기를 올릴까요?",
+                        when (ui.mode) {
+                            SessionMode.ADVICE -> "블로그를 함께 살펴볼까요?"
+                            SessionMode.FREE -> "무엇이든 물어보세요"
+                            SessionMode.WRITE -> "오늘은 어떤 이야기를 올릴까요?"
+                        },
                         style = AppTheme.typography.display, color = c.textPrimary,
                         textAlign = TextAlign.Center, maxLines = 1, softWrap = false,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg),
                     )
                     Spacer(Modifier.height(AppSpacing.section))
-                    if (ui.mode == SessionMode.WRITE) AttachmentTray(ui, viewModel)
+                    if (ui.mode in ChatViewModel.PHOTO_MODES) AttachmentTray(ui, viewModel)
                     composer(true)
-                    if (!ui.loggedIn) LoginNudge(onLogin, text = if (ui.mode == SessionMode.ADVICE) ChatViewModel.ADVICE_NEEDS_LOGIN else NOT_LOGGED_IN)
+                    if (!ui.loggedIn && ui.mode in LOGIN_NUDGE_MODES) LoginNudge(onLogin, text = if (ui.mode == SessionMode.ADVICE) ChatViewModel.ADVICE_NEEDS_LOGIN else NOT_LOGGED_IN)
                 }
             }
         } else {
@@ -390,13 +401,14 @@ private fun ChatPane(
                 modifier = Modifier.clearFocusOnPress().weight(1f).fillMaxWidth().padding(horizontal = AppSpacing.lg),
                 verticalArrangement = Arrangement.spacedBy(AppSpacing.xs),
             ) {
-                items(ui.messages, key = { it.id }) { message -> MessageItem(message, ui.panelOpen, viewModel) }
+                items(ui.messages, key = { it.id }) { message -> MessageItem(message, ui.mode, ui.panelOpen, viewModel) }
+                ui.streamingThought?.let { thought -> item(key = "streaming-thought") { ThoughtBlock(thought, expanded = !ui.thoughtCollapsed, onToggle = viewModel::toggleStreamingThought) } }
                 ui.streamingSay?.let { partial -> item { MessageBubble(partial, mine = false) } }
                 if (ui.thinking) item { ToolStatusLine(ui.toolStatus) }
             }
             ui.draftGate?.let { gate -> DraftGateCard(gate, viewModel) }
             QuickReplyChips(ui.quickReplies) { justSent = true; viewModel.sendQuickReply(it) }
-            if (ui.mode == SessionMode.WRITE) AttachmentTray(ui, viewModel)
+            if (ui.mode in ChatViewModel.PHOTO_MODES) AttachmentTray(ui, viewModel)
             // 계획이 있고 아직 초안이 없는 동안에는 초안 버튼이 입력창 위에 늘 걸려 있다.
             val published = ui.session?.status == SessionStatus.PUBLISHED
             if (ui.mode == SessionMode.WRITE && ui.plan != null && ui.panelJobId == null && !ui.thinking && ui.draftGate == null && !published) {
@@ -418,7 +430,7 @@ private fun ChatPane(
                 )
             }
             composer(false)
-            if (!ui.loggedIn) LoginNudge(onLogin, text = if (ui.mode == SessionMode.ADVICE) ChatViewModel.ADVICE_NEEDS_LOGIN else NOT_LOGGED_IN)
+            if (!ui.loggedIn && ui.mode in LOGIN_NUDGE_MODES) LoginNudge(onLogin, text = if (ui.mode == SessionMode.ADVICE) ChatViewModel.ADVICE_NEEDS_LOGIN else NOT_LOGGED_IN)
         }
     }
 }
@@ -462,7 +474,7 @@ private fun AttachmentTray(ui: ChatUiState, viewModel: ChatViewModel) {
         photos.mapNotNull { p -> ui.groupPicks?.indexOf(p.ref)?.takeIf { it >= 0 }?.let { Uri.parse(p.uri) to it + 1 } }.toMap()
     }
     // 초안이 나온 뒤에는 묶음을 바꿀 수 없다 — 에디터에 이미 들어간 사진 자리를 흔들지 않으려고.
-    val canGroup = ui.panelJobId == null && ui.attachments.size >= ChatViewModel.MIN_GROUP
+    val canGroup = ui.mode == SessionMode.WRITE && ui.panelJobId == null && ui.attachments.size >= ChatViewModel.MIN_GROUP
     Column(Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -539,9 +551,17 @@ private fun panelStatusText(state: PublishState): String? = when (state) {
 }
 
 @Composable
-private fun MessageItem(message: ChatMessage, panelOpen: Boolean, viewModel: ChatViewModel) {
+private fun MessageItem(message: ChatMessage, mode: SessionMode, panelOpen: Boolean, viewModel: ChatViewModel) {
     when (message.kind) {
-        MessageKind.TEXT -> MessageBubble(ChatPayloads.readText(message.payloadJson), mine = message.role == MessageRole.USER)
+        MessageKind.TEXT -> {
+            val mine = message.role == MessageRole.USER
+            val thought = if (mine) null else ChatPayloads.readThought(message.payloadJson)
+            if (thought != null) {
+                var expanded by remember(message.id) { mutableStateOf(false) }
+                ThoughtBlock(thought, expanded) { expanded = !expanded }
+            }
+            MessageBubble(ChatPayloads.readText(message.payloadJson), mine = mine, markdown = !mine && mode == SessionMode.FREE)
+        }
         MessageKind.PHOTOS -> ChatPayloads.readPhotos(message.payloadJson)?.let { PhotosBubble(it.uris) }
         // 계획 본문은 오른쪽 패널에 있다 — 목록에는 그 자리를 가리키는 한 줄만 남긴다.
         MessageKind.PLAN -> Text(
